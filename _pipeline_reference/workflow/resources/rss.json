@@ -1,0 +1,373 @@
+{
+  "configuration": {
+    "rsshub_domain": "https://rsshub.app",
+    "daily_target": 20,
+
+    "_type_descriptions": {
+      "rss": "Standard RSS feed (raw content)",
+      "atom": "Atom feed (typically GitHub releases)",
+      "rsshub": "RSSHub proxy feed",
+      "curated_rss": "Upstream AI-curated RSS (Stage 1+)",
+      "link": "Web page crawling",
+      "code": "GitHub README parsing",
+      "github_md_folder": "GitHub folder latest .md file fetcher (Stage 1.5)",
+      "github_json": "GitHub JSON file fetcher (ai-news-daily date-based aggregator)"
+    },
+
+    "deduplication": {
+      "enabled": true,
+      "method": "hybrid_url_then_embedding",
+      "canonical_url_fields": ["link", "guid"],
+      "embedding_similarity_threshold": 0.93,
+      "metadata_fields": ["title", "source", "category"],
+      "schedule": "daily_00:00_utc"
+    },
+
+    "filtering": {
+      "enabled": true,
+
+      "hard_drop_rules": {
+        "title_or_content_contains_any": [
+          "sponsored",
+          "press release",
+          "webinar",
+          "conference tickets",
+          "earnings call transcript",
+          "giveaway"
+        ],
+        "url_contains_any": [
+          "utm_source=",
+          "utm_medium=",
+          "ref="
+        ]
+      },
+
+      "topic_whitelist_keywords": [
+        "agent",
+        "agents",
+        "tool use",
+        "tool-use",
+        "MCP",
+        "function calling",
+        "computer use",
+        "coding agent",
+        "vibe coding",
+        "RAG",
+        "vector",
+        "inference",
+        "serving",
+        "latency",
+        "throughput",
+        "GPU",
+        "CUDA",
+        "quantization",
+        "speculative decoding",
+        "KV cache",
+        "LLM",
+        "multimodal",
+        "realtime",
+        "voice",
+        "speech",
+        "o1",
+        "reasoning",
+        "benchmark",
+        "eval",
+        "open weight",
+        "open-source",
+        "release",
+        "changelog"
+      ],
+
+      "soft_penalty_keywords": [
+        "opinion",
+        "hot take",
+        "meme",
+        "rumor",
+        "leak",
+        "celebrity",
+        "lawsuit"
+      ],
+
+      "arxiv_paper_filter": ["cs.AI", "cs.LG", "cs.CL", "cs.SE"],
+      "reddit_quality_filter": true,
+      "devto_relevance_filter": true
+    },
+
+    "selection": {
+      "enabled": true,
+      "mode": "global_top_n",
+      "top_n": 20,
+
+      "llm_tagging": {
+        "enabled": true,
+        "output_schema": {
+          "topic": "one_of(Model,Agent,VibeCoding,DevTool,Infra,Policy,Korea,Research,Other)",
+          "impact": "int_1_to_5",
+          "novelty": "int_1_to_5",
+          "proof": "int_1_to_5",
+          "confidence_score": "int_1_to_10",
+          "why_it_matters": "short_string",
+          "key_evidence": "short_string",
+          "who_should_care": "short_string",
+          "next_action": "optional_string",
+          "comparison": "optional_string",
+          "drop_reason": "optional_short_string"
+        },
+        "drop_if": {
+          "topic_in": ["Other"],
+          "impact_lte": 2,
+          "proof_lte": 2,
+          "confidence_score_lte": 3,
+          "content_quality": {
+            "summary_min_chars": 200,
+            "insight_min_filled": 2,
+            "insight_min_chars_each": 15
+          }
+        }
+      },
+
+      "scoring": {
+        "formula": "0.35*impact + 0.25*novelty + 0.25*proof + 0.15*recency",
+        "recency": {
+          "half_life_hours": 36
+        },
+        "penalties": [
+          { "if_title_or_content_contains_any": ["press release", "sponsored"], "subtract": 2.0 },
+          { "if_title_or_content_contains_any": ["minor", "typo", "chore", "docs only"], "subtract": 1.0 },
+          { "if_title_or_content_contains_any": ["alpha", "beta", "rc", "nightly", "dev"], "subtract": 0.8 }
+        ]
+      },
+
+      "diversity_quotas": {
+        "min": {
+          "Model": 2,
+          "Agent": 2,
+          "VibeCoding": 1,
+          "DevTool": 1,
+          "Infra": 1,
+          "Korea": 2
+        },
+        "max": {
+          "Research": 3,
+          "Policy": 3
+        }
+      },
+
+      "source_weights": {
+        "P0_CURATED": 1.25,
+        "P0_RELEASES": 1.15,
+        "P1_CONTEXT": 1.0,
+        "P2_RAW": 0.85,
+        "COMMUNITY": 0.7
+      }
+    }
+  },
+
+  "categories": [
+    {
+      "category": "P0 Curated Newsletters",
+      "priority": "critical",
+      "items": [
+        {
+          "title": "TLDR AI",
+          "url": "https://bullrich.dev/tldr-rss/ai.rss",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 10,
+          "output_count": 8,
+          "added_reason": "Top priority P0 - Most important AI newsletter, bullrich.dev mirror (stable)"
+        },
+        {
+          "title": "TLDR Tech",
+          "url": "https://bullrich.dev/tldr-rss/feed.rss",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 8,
+          "output_count": 6,
+          "added_reason": "P0 - Broader tech coverage with quality AI/dev content"
+        },
+        {
+          "title": "GENEXIS-AI DailyNews (openchoi 이어받음)",
+          "url": "github://GENEXIS-AI/DailyNews/%EB%89%B4%EC%8A%A4%EB%A0%88%ED%84%B0@main",
+          "type": "github_md_folder",
+          "tier": "P0_CURATED",
+          "input_count": 15,
+          "output_count": 8,
+          "added_reason": "P0 Korea - openchoi 내용을 그대로 이어받은 한국어 AI 뉴스레터. rss.app 의존성 제거, GitHub 직접 연동",
+          "exclude_threads_links": true,
+          "hide_source_name": true
+        },
+        {
+          "title": "The Rundown AI",
+          "url": "https://rss.beehiiv.com/feeds/2R3C6Bt5wj.xml",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 3,
+          "output_count": 2
+        },
+        {
+          "title": "The Neuron",
+          "url": "https://rss.beehiiv.com/feeds/N4eCstxvgX.xml",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 4,
+          "output_count": 3
+        },
+        {
+          "title": "ai-news-daily (Local LLM Aggregator)",
+          "url": "github-json://ai-news-daily/ai-news-daily.github.io",
+          "type": "github_json",
+          "tier": "P0_CURATED",
+          "added_reason": "P0 - AI news aggregator using local LLM (Transformers.js), 3000+ daily articles with confidence scores. Date-based JSON files.",
+          "input_count": 30,
+          "output_count": 8
+        },
+        {
+          "title": "MIT Technology Review",
+          "url": "https://www.technologyreview.com/feed/",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 5,
+          "output_count": 4,
+          "added_reason": "P0 - High-quality AI/Tech analysis and trend reports"
+        },
+        {
+          "title": "GeekNews (전체)",
+          "url": "https://news.hada.io/rss/news",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 10,
+          "output_count": 6,
+          "added_reason": "P0 Korea - 한국 개발자 커뮤니티 고신호 큐레이션"
+        },
+        {
+          "title": "GeekNews Blog",
+          "url": "https://news.hada.io/rss/blog",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 3,
+          "output_count": 2,
+          "added_reason": "P0 Korea - GeekNews 공지/업데이트"
+        },
+        {
+          "title": "토스 기술 블로그",
+          "url": "https://toss.tech/rss.xml",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 5,
+          "output_count": 3,
+          "added_reason": "P0 Korea - LLM/바이브코딩 적용 사례, 한국 핀테크 기술 트렌드"
+        },
+        {
+          "title": "Bloter AI",
+          "url": "https://www.bloter.net/archives/category/ai/feed",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 5,
+          "output_count": 3,
+          "added_reason": "P0 Korea - 한국 AI 산업 뉴스"
+        },
+        {
+          "title": "AI Times",
+          "url": "https://www.aitimes.com/rss/allArticle.xml",
+          "type": "rss",
+          "tier": "P0_CURATED",
+          "input_count": 8,
+          "output_count": 5,
+          "added_reason": "P0 Korea - 한국 AI 전문 미디어"
+        }
+      ]
+    },
+
+    {
+      "category": "P0 Release Radar (GitHub Releases Atom)",
+      "priority": "critical",
+      "items": [
+        { "title": "vLLM Releases", "url": "https://github.com/vllm-project/vllm/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "llama.cpp Releases", "url": "https://github.com/ggml-org/llama.cpp/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "Ollama Releases", "url": "https://github.com/ollama/ollama/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "Transformers Releases", "url": "https://github.com/huggingface/transformers/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "LangChain Releases", "url": "https://github.com/langchain-ai/langchain/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "LlamaIndex Releases", "url": "https://github.com/run-llama/llama_index/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "LiteLLM Releases", "url": "https://github.com/BerriAI/litellm/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "Open WebUI Releases", "url": "https://github.com/open-webui/open-webui/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "Microsoft AutoGen Releases", "url": "https://github.com/microsoft/autogen/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "Vercel AI SDK Releases", "url": "https://github.com/vercel/ai/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "Aider Releases", "url": "https://github.com/paul-gauthier/aider/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "Continue Releases", "url": "https://github.com/continuedev/continue/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 },
+        { "title": "OpenHands Releases", "url": "https://github.com/OpenHands/OpenHands/releases.atom", "type": "atom", "tier": "P0_RELEASES", "input_count": 5, "output_count": 1 }
+      ]
+    },
+
+    {
+      "category": "P1 Context & Weekly (Use as validation, not quota)",
+      "priority": "high",
+      "items": [
+        { "title": "The Batch (DeepLearning.AI)", "url": "https://charonhub.deeplearning.ai/rss/", "type": "rss", "tier": "P1_CONTEXT", "input_count": 5, "output_count": 3 },
+        { "title": "TheSequence", "url": "https://thesequence.substack.com/feed", "type": "rss", "tier": "P1_CONTEXT", "input_count": 5, "output_count": 3 },
+        { "title": "Import AI (Jack Clark)", "url": "https://importai.substack.com/feed", "type": "rss", "tier": "P1_CONTEXT", "input_count": 5, "output_count": 3 },
+        { "title": "Latent Space", "url": "https://www.latent.space/feed", "type": "rss", "tier": "P1_CONTEXT", "input_count": 8, "output_count": 4, "added_reason": "P1 - AI Engineer podcast/blog, vibe coding community hub" },
+        { "title": "Latent Space Podcast", "url": "https://rss.art19.com/latent-space-ai", "type": "rss", "tier": "P1_CONTEXT", "input_count": 5, "output_count": 2, "added_reason": "P1 - Audio feed for AI Engineer discussions" },
+        { "title": "Simon Willison", "url": "https://simonwillison.net/atom/everything/", "type": "atom", "tier": "P1_CONTEXT", "input_count": 10, "output_count": 4, "added_reason": "P1 - Datasette creator, LLM/tool use insights" },
+        { "title": "SemiAnalysis", "url": "https://www.semianalysis.com/feed", "type": "rss", "tier": "P1_CONTEXT", "input_count": 5, "output_count": 3, "added_reason": "P1 - AI infra/chips deep analysis" },
+        { "title": "The Pragmatic Engineer", "url": "https://blog.pragmaticengineer.com/rss/", "type": "rss", "tier": "P1_CONTEXT", "input_count": 5, "output_count": 3, "added_reason": "P1 - Engineering trends, AI adoption in big tech" },
+        { "title": "Interconnects", "url": "https://www.interconnects.ai/feed", "type": "rss", "tier": "P1_CONTEXT", "input_count": 8, "output_count": 4, "added_reason": "P1 - Deep AI/ML infrastructure analysis, thought leadership" },
+        { "title": "Last Week in AI", "url": "https://lastweekin.ai/feed", "type": "rss", "tier": "P1_CONTEXT", "input_count": 10, "output_count": 5, "added_reason": "P1 - Weekly AI digest for validation/context" },
+        { "title": "The Gradient", "url": "https://thegradient.pub/rss/", "type": "rss", "tier": "P1_CONTEXT", "input_count": 5, "output_count": 3, "added_reason": "P1 - High-quality research analysis (TEST: monitor frequency)" }
+      ]
+    },
+
+    {
+      "category": "P2 Raw Official Sources (Only win if high score)",
+      "priority": "medium",
+      "items": [
+        { "title": "OpenAI News", "url": "https://openai.com/news/rss.xml", "type": "rss", "tier": "P2_RAW", "input_count": 10, "output_count": 5 },
+        { "title": "Google AI (The Keyword)", "url": "https://blog.google/technology/ai/rss/", "type": "rss", "tier": "P2_RAW", "input_count": 10, "output_count": 5 },
+        { "title": "Google DeepMind Blog", "url": "https://deepmind.google/blog/rss.xml", "type": "rss", "tier": "P2_RAW", "input_count": 10, "output_count": 5 },
+        { "title": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml", "type": "rss", "tier": "P2_RAW", "input_count": 10, "output_count": 6 },
+        {
+          "title": "Product Hunt",
+          "url": "https://www.producthunt.com/feed",
+          "type": "rss",
+          "tier": "P2_RAW",
+          "input_count": 30,
+          "output_count": 10,
+          "added_reason": "P2 - AI/dev tool discovery from Product Hunt daily launches (important feed)"
+        },
+        { "title": "NVIDIA Technical Blog", "url": "https://developer.nvidia.com/blog/feed", "type": "rss", "tier": "P2_RAW", "input_count": 10, "output_count": 5, "added_reason": "P2 - GPU/inference/CUDA official source, infra focus" },
+        { "title": "Synced", "url": "https://syncedreview.com/feed", "type": "rss", "tier": "P2_RAW", "input_count": 10, "output_count": 5, "added_reason": "P2 - China AI research coverage, fills geographic gap" },
+        { "title": "THE DECODER", "url": "https://the-decoder.com/feed/", "type": "rss", "tier": "P2_RAW", "input_count": 10, "output_count": 4, "added_reason": "P2 - European LLM coverage (TEST: monitor signal quality)" }
+      ]
+    },
+
+    {
+      "category": "Research (arXiv - max quota 2)",
+      "priority": "low",
+      "items": [
+        { "title": "arXiv cs.AI", "url": "https://export.arxiv.org/rss/cs.AI", "type": "rss", "tier": "COMMUNITY", "input_count": 20, "output_count": 3, "added_reason": "Research - Artificial Intelligence papers" },
+        { "title": "arXiv cs.LG", "url": "https://export.arxiv.org/rss/cs.LG", "type": "rss", "tier": "COMMUNITY", "input_count": 20, "output_count": 3, "added_reason": "Research - Machine Learning papers" },
+        { "title": "arXiv cs.CL", "url": "https://export.arxiv.org/rss/cs.CL", "type": "rss", "tier": "COMMUNITY", "input_count": 20, "output_count": 3, "added_reason": "Research - Computational Linguistics/NLP papers" },
+        { "title": "arXiv cs.SE", "url": "https://export.arxiv.org/rss/cs.SE", "type": "rss", "tier": "COMMUNITY", "input_count": 20, "output_count": 3, "added_reason": "Research - Software Engineering papers" }
+      ]
+    },
+
+    {
+      "category": "Community (Discovery - strict filtering)",
+      "priority": "low",
+      "items": [
+        { "title": "Hacker News Frontpage", "url": "https://hnrss.org/frontpage", "type": "rss", "tier": "COMMUNITY", "input_count": 30, "output_count": 8 },
+        { "title": "Reddit r/vibecoding", "url": "https://www.reddit.com/r/vibecoding/.rss", "type": "rss", "tier": "COMMUNITY", "input_count": 10, "output_count": 5, "added_reason": "Community - Vibe coding discussions" },
+        { "title": "Reddit r/ArtificialIntelligence", "url": "https://www.reddit.com/r/ArtificialIntelligence/.rss", "type": "rss", "tier": "COMMUNITY", "input_count": 10, "output_count": 5, "added_reason": "Community - AI general discussions" },
+        { "title": "Reddit r/MachineLearning", "url": "https://www.reddit.com/r/MachineLearning/.rss", "type": "rss", "tier": "COMMUNITY", "input_count": 10, "output_count": 5, "added_reason": "Community - ML research/papers discussions" },
+        { "title": "Reddit r/PromptEngineering", "url": "https://www.reddit.com/r/PromptEngineering/.rss", "type": "rss", "tier": "COMMUNITY", "input_count": 10, "output_count": 5, "added_reason": "Community - Prompt engineering techniques" }
+      ]
+    }
+  ],
+
+  "summary": {
+    "goal": "High-signal daily top 20 AI trend brief (newsletter-first, Korea analyst-style, vibe coding/dev tool heavy)",
+    "expected_daily_candidates_before_dedup": "80-160",
+    "expected_daily_candidates_after_dedup": "55-110",
+    "expected_daily_final": 20
+  }
+}
