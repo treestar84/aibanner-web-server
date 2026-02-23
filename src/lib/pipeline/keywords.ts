@@ -30,12 +30,22 @@ const STOPWORDS = new Set([
 // ─── Rule-based normalization ─────────────────────────────────────────────────
 
 function slugify(text: string): string {
-  return text
+  // ASCII 영문이면 일반 slug, 한글 등 CJK 포함 시 hex 해시로 안정적 ID 생성
+  const ascii = text
     .toLowerCase()
     .replace(/[_\-.]+/g, " ")
     .replace(/[^\w\s]/g, "")
     .replace(/\s+/g, "_")
     .trim();
+
+  if (ascii.replace(/_/g, "").length >= 2) return ascii;
+
+  // 비 ASCII 주도 텍스트 → 간단한 해시
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) - hash + text.charCodeAt(i)) >>> 0;
+  }
+  return `kw_${hash.toString(36)}`;
 }
 
 function isStopword(token: string): boolean {
@@ -145,15 +155,15 @@ export async function clusterKeywords(
         { role: "system", content: CLUSTER_PROMPT },
         { role: "user", content: batch },
       ],
-      response_format: { type: "json_object" },
       temperature: 0.1,
     });
 
-    const content = response.choices[0]?.message?.content ?? "{}";
-    const parsed = JSON.parse(content);
-    const clusters: ClusterResult[] = Array.isArray(parsed)
-      ? parsed
-      : parsed.clusters ?? [];
+    const content = response.choices[0]?.message?.content ?? "[]";
+    // JSON 배열 추출 (마크다운 코드블록 감싸는 경우도 처리)
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+    const parsed = JSON.parse(jsonMatch[0]);
+    const clusters: ClusterResult[] = Array.isArray(parsed) ? parsed : [];
     return clusters.filter((c) => c.canonical && Array.isArray(c.aliases));
   } catch (err) {
     console.warn("[keywords] AI clustering failed, using raw candidates:", err);
@@ -169,10 +179,11 @@ export async function normalizeKeywords(
 ): Promise<NormalizedKeyword[]> {
   const candidateMap = extractCandidates(items);
 
-  // 2회 이상 등장하거나 P0 피드 출처인 후보만 선별
-  const filtered = Array.from(candidateMap.entries())
-    .filter(([, v]) => v.count >= 2 || v.tier === "P0_CURATED" || v.tier === "P0_RELEASES")
-    .map(([, v]) => v.text);
+  // count 기준 정렬 후 상위 60개만 AI 클러스터링으로 전달
+  const filtered = Array.from(candidateMap.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 60)
+    .map((v) => v.text);
 
   const clusters = await clusterKeywords(filtered);
 

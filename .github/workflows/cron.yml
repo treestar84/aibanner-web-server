@@ -1,0 +1,20 @@
+name: Snapshot Pipeline
+
+on:
+  schedule:
+    - cron: "0 0 * * *"   # KST 09:00 (UTC 00:00)
+    - cron: "0 9 * * *"   # KST 18:00 (UTC 09:00)
+  workflow_dispatch:       # 수동 실행 버튼
+
+jobs:
+  run-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger snapshot pipeline
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -f -X GET "${APP_URL}/api/cron/snapshot" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            --max-time 300

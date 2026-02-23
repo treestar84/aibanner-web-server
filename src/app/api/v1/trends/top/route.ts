@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLatestSnapshot, getTopKeywords } from "@/lib/db/queries";
-import { cachedTrendsTop } from "@/lib/kv/cache";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -11,13 +10,18 @@ export async function GET(req: NextRequest) {
     const limitParam = url.searchParams.get("limit");
     const limit = Math.min(50, Math.max(1, parseInt(limitParam ?? "10", 10)));
 
-    const data = await cachedTrendsTop(limit, async () => {
-      const snapshot = await getLatestSnapshot();
-      if (!snapshot) return null;
+    const snapshot = await getLatestSnapshot();
+    if (!snapshot) {
+      return NextResponse.json(
+        { error: "No snapshot available yet" },
+        { status: 404 }
+      );
+    }
 
-      const keywords = await getTopKeywords(snapshot.snapshot_id, limit);
+    const keywords = await getTopKeywords(snapshot.snapshot_id, limit);
 
-      return {
+    return NextResponse.json(
+      {
         snapshotId: snapshot.snapshot_id,
         updatedAt: snapshot.updated_at_utc,
         nextUpdateAt: snapshot.next_update_at_utc,
@@ -46,21 +50,13 @@ export async function GET(req: NextRequest) {
               }
             : null,
         })),
-      };
-    });
-
-    if (!data) {
-      return NextResponse.json(
-        { error: "No snapshot available yet" },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(data, {
-      headers: {
-        "Cache-Control": "public, s-maxage=120, stale-while-revalidate=60",
       },
-    });
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=120, stale-while-revalidate=60",
+        },
+      }
+    );
   } catch (err) {
     console.error("[/api/v1/trends/top]", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

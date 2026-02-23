@@ -30,7 +30,7 @@ function extractDomain(url: string): string {
   }
 }
 
-// ─── Per-type queries (PRD §5.1) ─────────────────────────────────────────────
+// ─── Queries (news + web only) ────────────────────────────────────────────────
 
 async function fetchNews(
   client: ReturnType<typeof tavily>,
@@ -84,74 +84,15 @@ async function fetchWeb(
   }
 }
 
-async function fetchVideo(
-  client: ReturnType<typeof tavily>,
-  keyword: string,
-  maxResults = 5
-): Promise<TavilySource[]> {
-  try {
-    const res = await client.search(
-      `${keyword} site:youtube.com OR site:vimeo.com`,
-      {
-        searchDepth: "basic",
-        maxResults,
-        includeImages: false,
-      }
-    );
-    return res.results.map((r) => ({
-      title: r.title,
-      url: r.url,
-      domain: extractDomain(r.url),
-      snippet: (r.content ?? "").slice(0, 220),
-      imageUrl: null,
-      publishedAt: r.publishedDate ?? null,
-      type: "video" as SourceType,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-async function fetchImages(
-  client: ReturnType<typeof tavily>,
-  keyword: string,
-  maxResults = 5
-): Promise<TavilySource[]> {
-  try {
-    const res = await client.search(keyword, {
-      searchDepth: "basic",
-      maxResults,
-      includeImages: true,
-    });
-
-    const images = res.images ?? [];
-    return images.slice(0, maxResults).map((img) => ({
-      title: typeof img === "string" ? keyword : (img as { description?: string }).description ?? keyword,
-      url: typeof img === "string" ? img : (img as { url: string }).url,
-      domain: extractDomain(typeof img === "string" ? img : (img as { url: string }).url),
-      snippet: "",
-      imageUrl: typeof img === "string" ? img : (img as { url: string }).url,
-      publishedAt: null,
-      type: "image" as SourceType,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-// ─── Main export ──────────────────────────────────────────────────────────────
+// ─── Main export (news + web만 수집) ─────────────────────────────────────────
 
 export async function collectSources(
   keyword: string
 ): Promise<Record<SourceType, TavilySource[]>> {
   const client = getClient();
-
-  const [news, web, video, images] = await Promise.all([
+  const [news, web] = await Promise.all([
     fetchNews(client, keyword),
     fetchWeb(client, keyword),
-    fetchVideo(client, keyword),
-    fetchImages(client, keyword),
   ]);
-
-  return { news, web, video, image: images };
+  return { news, web, video: [], image: [] };
 }

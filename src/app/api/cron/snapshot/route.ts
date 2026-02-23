@@ -22,6 +22,8 @@ export async function GET(req: NextRequest) {
       ok: true,
       snapshotId: result.snapshotId,
       keywordCount: result.keywordCount,
+      reusedCount: result.reusedCount,
+      newCount: result.keywordCount - result.reusedCount,
     });
   } catch (err) {
     console.error("[cron/snapshot]", err);

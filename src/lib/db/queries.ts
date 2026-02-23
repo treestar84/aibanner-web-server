@@ -47,21 +47,21 @@ export interface Source {
 // ─── Snapshot queries ─────────────────────────────────────────────────────────
 
 export async function getLatestSnapshot(): Promise<Snapshot | null> {
-  const result = await sql<Snapshot>`
+  const rows = (await sql`
     SELECT * FROM snapshots
     ORDER BY created_at DESC
     LIMIT 1
-  `;
-  return result.rows[0] ?? null;
+  `) as Snapshot[];
+  return rows[0] ?? null;
 }
 
 export async function getSnapshotById(
   snapshotId: string
 ): Promise<Snapshot | null> {
-  const result = await sql<Snapshot>`
+  const rows = (await sql`
     SELECT * FROM snapshots WHERE snapshot_id = ${snapshotId}
-  `;
-  return result.rows[0] ?? null;
+  `) as Snapshot[];
+  return rows[0] ?? null;
 }
 
 export async function insertSnapshot(snapshot: Omit<Snapshot, "created_at">): Promise<void> {
@@ -78,37 +78,36 @@ export async function getTopKeywords(
   snapshotId: string,
   limit = 10
 ): Promise<Keyword[]> {
-  const result = await sql<Keyword>`
+  return (await sql`
     SELECT * FROM keywords
     WHERE snapshot_id = ${snapshotId}
     ORDER BY rank ASC
     LIMIT ${limit}
-  `;
-  return result.rows;
+  `) as Keyword[];
 }
 
 export async function getKeywordById(
   keywordId: string,
   snapshotId: string
 ): Promise<Keyword | null> {
-  const result = await sql<Keyword>`
+  const rows = (await sql`
     SELECT * FROM keywords
     WHERE keyword_id = ${keywordId} AND snapshot_id = ${snapshotId}
-  `;
-  return result.rows[0] ?? null;
+  `) as Keyword[];
+  return rows[0] ?? null;
 }
 
 export async function getKeywordInLatestSnapshot(
   keywordId: string
 ): Promise<Keyword | null> {
-  const result = await sql<Keyword>`
+  const rows = (await sql`
     SELECT k.* FROM keywords k
     JOIN snapshots s ON k.snapshot_id = s.snapshot_id
     WHERE k.keyword_id = ${keywordId}
     ORDER BY s.created_at DESC
     LIMIT 1
-  `;
-  return result.rows[0] ?? null;
+  `) as Keyword[];
+  return rows[0] ?? null;
 }
 
 export async function insertKeyword(keyword: Omit<Keyword, "created_at">): Promise<void> {
@@ -137,17 +136,17 @@ export async function getPreviousRanks(
 ): Promise<Map<string, number>> {
   if (keywordIds.length === 0) return new Map();
 
-  const result = await sql<{ keyword_id: string; rank: number }>`
+  const rows = (await sql`
     SELECT k.keyword_id, k.rank
     FROM keywords k
     JOIN snapshots s ON k.snapshot_id = s.snapshot_id
-    WHERE k.keyword_id = ANY(${keywordIds as unknown as string})
+    WHERE k.keyword_id = ANY(${keywordIds})
       AND s.created_at < (SELECT created_at FROM snapshots WHERE snapshot_id = ${snapshotId})
     ORDER BY s.created_at DESC
-  `;
+  `) as { keyword_id: string; rank: number }[];
 
   const map = new Map<string, number>();
-  for (const row of result.rows) {
+  for (const row of rows) {
     if (!map.has(row.keyword_id)) {
       map.set(row.keyword_id, row.rank);
     }
@@ -161,12 +160,11 @@ export async function getSourcesByKeyword(
   snapshotId: string,
   keywordId: string
 ): Promise<Source[]> {
-  const result = await sql<Source>`
+  return (await sql`
     SELECT * FROM sources
     WHERE snapshot_id = ${snapshotId} AND keyword_id = ${keywordId}
     ORDER BY type, id ASC
-  `;
-  return result.rows;
+  `) as Source[];
 }
 
 export async function insertSource(

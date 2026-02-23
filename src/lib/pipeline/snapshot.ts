@@ -10,8 +10,9 @@ import {
   insertSource,
   getLatestSnapshot,
   getPreviousRanks,
+  getKeywordById,
+  getSourcesByKeyword,
 } from "@/lib/db/queries";
-import { invalidateApiCache } from "@/lib/kv/cache";
 
 // ─── Snapshot ID ──────────────────────────────────────────────────────────────
 
@@ -27,15 +28,16 @@ function buildSnapshotId(): string {
 }
 
 function nextScheduledTime(): Date {
-  const scheduleHoursKST = [0, 3, 9, 12]; // UTC = KST-9: 09/12/18/21 KST
+  // 하루 2회: KST 09:00 (UTC 00:00), KST 18:00 (UTC 09:00)
+  const scheduleUTC = [0, 9];
   const now = new Date();
-  const kstHour = (now.getUTCHours() + 9) % 24;
+  const nowUTCHour = now.getUTCHours();
 
-  const nextKstHour = scheduleHoursKST.find((h) => h > kstHour) ?? scheduleHoursKST[0];
-  const addDays = nextKstHour <= kstHour ? 1 : 0;
+  const nextUTCHour = scheduleUTC.find((h) => h > nowUTCHour) ?? scheduleUTC[0];
+  const addDays = nextUTCHour <= nowUTCHour ? 1 : 0;
 
   const next = new Date(now);
-  next.setUTCHours(nextKstHour - 9 + addDays * 24, 0, 0, 0);
+  next.setUTCHours(nextUTCHour + addDays * 24, 0, 0, 0);
   return next;
 }
 
@@ -44,8 +46,12 @@ function nextScheduledTime(): Date {
 export async function runSnapshotPipeline(): Promise<{
   snapshotId: string;
   keywordCount: number;
+  reusedCount: number;
 }> {
   console.log("[snapshot] Pipeline started");
+
+  // 이전 스냅샷 확인 (캐시 재사용 기준)
+  const prevSnapshot = await getLatestSnapshot();
 
   // 1) RSS 수집
   console.log("[snapshot] Step 1: Collecting RSS items...");
@@ -78,30 +84,83 @@ export async function runSnapshotPipeline(): Promise<{
     next_update_at_utc: nextScheduledTime().toISOString(),
   });
 
-  // 8) 각 키워드별 Tavily + 요약 + OG 이미지 + 저장
+  // 8) 각 키워드별 처리 (신규: Tavily 수집 / 재사용: 이전 스냅샷 복사)
   let keywordCount = 0;
+  let reusedCount = 0;
+  const DEFAULT_IMAGE = "/images/default-thumbnail.png";
+
   for (const item of rankedWithDelta) {
     const kw = item.keyword;
-    console.log(`[snapshot] Processing keyword: ${kw.keyword} (rank ${item.rank})`);
+    const isReused = prevSnapshot !== null && prevRankMap.has(kw.keywordId);
+
+    console.log(
+      `[snapshot] ${isReused ? "[REUSE]" : "[NEW]  "} ${kw.keyword} (rank ${item.rank})`
+    );
 
     try {
-      // Tavily 검색
-      const sourcesMap = await collectSources(kw.keyword);
-      const allSources = [
-        ...sourcesMap.news,
-        ...sourcesMap.web,
-        ...sourcesMap.video,
-        ...sourcesMap.image,
-      ];
+      if (isReused && prevSnapshot) {
+        // ── 재사용: 이전 스냅샷 소스 복사 ──────────────────────────────────
+        const [prevKeyword, prevSources] = await Promise.all([
+          getKeywordById(kw.keywordId, prevSnapshot.snapshot_id),
+          getSourcesByKeyword(prevSnapshot.snapshot_id, kw.keywordId),
+        ]);
 
-      // OG 이미지 추출 (상위 N개만)
+        if (!prevKeyword || prevSources.length === 0) {
+          // 이전 데이터가 없으면 신규로 처리 (fallthrough)
+          console.warn(`[snapshot] Cache miss for ${kw.keyword}, fetching fresh`);
+        } else {
+          await insertKeyword({
+            snapshot_id: snapshotId,
+            keyword_id: kw.keywordId,
+            keyword: kw.keyword,
+            rank: item.rank,
+            delta_rank: item.deltaRank,
+            is_new: false,
+            score: item.score.total,
+            score_recency: item.score.recency,
+            score_frequency: item.score.frequency,
+            score_authority: item.score.authority,
+            score_internal: item.score.internal,
+            // 이전 스냅샷에서 재사용
+            summary_short: prevKeyword.summary_short,
+            primary_type: prevKeyword.primary_type,
+            top_source_title: prevKeyword.top_source_title,
+            top_source_url: prevKeyword.top_source_url,
+            top_source_domain: prevKeyword.top_source_domain,
+            top_source_image_url: prevKeyword.top_source_image_url,
+          });
+
+          for (const src of prevSources) {
+            await insertSource({
+              snapshot_id: snapshotId,
+              keyword_id: src.keyword_id,
+              type: src.type,
+              title: src.title,
+              url: src.url,
+              domain: src.domain,
+              published_at_utc: src.published_at_utc,
+              snippet: src.snippet,
+              image_url: src.image_url,
+            });
+          }
+
+          reusedCount++;
+          keywordCount++;
+          continue;
+        }
+      }
+
+      // ── 신규: Tavily 수집 (news + web) ─────────────────────────────────────
+      const sourcesMap = await collectSources(kw.keyword);
+      const allSources = [...sourcesMap.news, ...sourcesMap.web];
+
+      // OG 이미지 추출
       const urlsToFetch = allSources
-        .filter((s) => s.type !== "image" && !s.imageUrl)
-        .slice(0, 15)
+        .filter((s) => !s.imageUrl)
+        .slice(0, 10)
         .map((s) => s.url);
       const ogMap = await batchExtractOgImages(urlsToFetch);
 
-      // 이미지 URL 채우기
       for (const source of allSources) {
         if (!source.imageUrl && ogMap.has(source.url)) {
           source.imageUrl = ogMap.get(source.url) ?? null;
@@ -114,10 +173,8 @@ export async function runSnapshotPipeline(): Promise<{
         sourcesMap.news.length > 0 ? sourcesMap.news : allSources.slice(0, 5)
       );
 
-      // Top source (news 우선)
       const topSource = sourcesMap.news[0] ?? allSources[0];
 
-      // keyword 저장
       await insertKeyword({
         snapshot_id: snapshotId,
         keyword_id: kw.keywordId,
@@ -138,8 +195,6 @@ export async function runSnapshotPipeline(): Promise<{
         top_source_image_url: topSource?.imageUrl ?? null,
       });
 
-      // sources 저장
-      const DEFAULT_IMAGE = "/images/default-thumbnail.png";
       for (const [type, typeItems] of Object.entries(sourcesMap)) {
         for (const source of typeItems.slice(0, 8)) {
           await insertSource({
@@ -162,11 +217,8 @@ export async function runSnapshotPipeline(): Promise<{
     }
   }
 
-  // 9) API 캐시 무효화
-  await invalidateApiCache();
-
   console.log(
-    `[snapshot] Pipeline complete: snapshotId=${snapshotId}, keywords=${keywordCount}`
+    `[snapshot] Pipeline complete: snapshotId=${snapshotId}, keywords=${keywordCount} (reused=${reusedCount}, new=${keywordCount - reusedCount})`
   );
-  return { snapshotId, keywordCount };
+  return { snapshotId, keywordCount, reusedCount };
 }

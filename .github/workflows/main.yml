@@ -1,0 +1,155 @@
+# Daily News Automation Workflow
+# Generates RSS summaries, Daily Report, and style markdown archives
+name: Daily News Update
+
+on:
+  # Scheduled run: every day at 00:01 KST (15:01 UTC previous day)
+  schedule:
+    - cron: '1 15 * * *'  # UTC 15:01 = KST 00:01 (collects previous day's articles)
+
+  # Manual trigger for testing
+  workflow_dispatch:
+
+  # Also run on push to main (optional - for PR merge deployments)
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+
+# Prevent concurrent runs
+concurrency:
+  group: daily-news-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  create-daily-news:
+    runs-on: ubuntu-latest
+
+    env:
+      # Git configuration
+      GIT_NAME: ${{ secrets.GIT_NAME || 'github-actions[bot]' }}
+      GIT_EMAIL: ${{ secrets.GIT_EMAIL || 'github-actions[bot]@users.noreply.github.com' }}
+
+      # AI Provider configuration
+      AI_PROVIDER: openai
+      GPT_MODEL_NAME: gpt-4o-mini
+      GPT_BASE_URL: https://api.openai.com/v1
+      GPT_API_KEY: ${{ secrets.GPT_API_KEY }}
+
+      # GitHub API (use built-in GITHUB_TOKEN)
+      # Rate limits: unauthenticated=60/hr, GITHUB_TOKEN=1000/hr, PAT=5000/hr
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+      # Korean summary language
+      SUMMARY_LANGUAGE: ko
+
+      # Kakao Talk Notification
+      # Note: ACCESS_TOKEN is not required (auto-refreshed from REFRESH_TOKEN)
+      KAKAO_NOTIFICATION_ENABLED: ${{ secrets.KAKAO_NOTIFICATION_ENABLED || 'false' }}
+      KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+      KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+      KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+
+      # GitHub Secrets Auto-Update (for Kakao refresh token renewal)
+      # GH_PAT needs 'repo' scope to update secrets
+      GH_PAT: ${{ secrets.GH_PAT }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for proper git operations
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r ./requirements.txt
+
+      - name: Verify environment
+        run: |
+          echo "AI Provider: $AI_PROVIDER"
+          echo "Model: $GPT_MODEL_NAME"
+          echo "Language: $SUMMARY_LANGUAGE"
+          python3 --version
+          ls -la
+
+      - name: Run Daily News Pipeline
+        run: |
+          echo "Starting RSS collection and AI summarization..."
+          python3 ./main.py
+          echo "Pipeline completed!"
+
+      - name: Verify generated files
+        run: |
+          echo "=== Daily Report Files ==="
+          ls -la src/content/blog/ | tail -10
+
+          echo ""
+          echo "=== Archive Files ==="
+          if [ -d "content" ]; then
+            find content -name "*.md" -type f | head -20
+            echo "Total files: $(find content -name '*.md' -type f | wc -l)"
+          else
+            echo "No content directory found (first run)"
+          fi
+
+      - name: Validate and fix markdown files
+        run: |
+          echo "=== Validating Markdown Files ==="
+          python3 validate_and_fix_md.py
+          if [ $? -ne 0 ]; then
+            echo "❌ Markdown validation failed!"
+            exit 1
+          fi
+          echo "✅ All markdown files validated successfully"
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GIT_NAME"
+          git config user.email "$GIT_EMAIL"
+
+      - name: Commit and Push changes
+        run: |
+          # Add generated content
+          git add src/content/blog/
+          git add src/data/metrics.json
+          git add content/ || true  # content/ may not exist on first run
+
+          # Check for changes
+          if git diff --cached --quiet; then
+            echo "No changes to commit - skipping"
+            exit 0
+          fi
+
+          # Create commit with date
+          COMMIT_DATE=$(date +%Y-%m-%d)
+          git commit -m "chore: update daily news ${COMMIT_DATE} [skip ci]"
+
+          # Sync with remote to avoid push conflicts
+          git pull --rebase origin main
+
+          # Push to main branch
+          git push origin main
+          echo "Changes pushed successfully!"
+
+      - name: Summary
+        run: |
+          echo "## Daily News Update Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Date: $(date +%Y-%m-%d)" >> $GITHUB_STEP_SUMMARY
+          echo "- AI Model: $GPT_MODEL_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "- Language: $SUMMARY_LANGUAGE" >> $GITHUB_STEP_SUMMARY
+          if [ -d "content" ]; then
+            echo "- Files: $(find content -name '*.md' -type f | wc -l)" >> $GITHUB_STEP_SUMMARY
+          fi
