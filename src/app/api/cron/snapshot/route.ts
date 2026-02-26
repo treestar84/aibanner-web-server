@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { runSnapshotPipeline } from "@/lib/pipeline/snapshot";
 
 export const runtime = "nodejs";
-export const maxDuration = 300; // 5분 (Vercel Pro 기준)
+export const maxDuration = 60; // Vercel Free 플랜 최대값
 
 export async function GET(req: NextRequest) {
   // Vercel Cron 인증 헤더 또는 CRON_SECRET 검증

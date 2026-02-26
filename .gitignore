@@ -39,3 +39,6 @@ Thumbs.db
 .vscode/
 *.iml
 .env*.local
+
+# Local test results (not for deployment)
+local-tests/

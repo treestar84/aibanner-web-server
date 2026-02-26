@@ -55,6 +55,36 @@ export async function getLatestSnapshot(): Promise<Snapshot | null> {
   return rows[0] ?? null;
 }
 
+export async function getRecentSnapshots(limit: number): Promise<Snapshot[]> {
+  return (await sql`
+    SELECT * FROM snapshots
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `) as Snapshot[];
+}
+
+export async function findCachedKeyword(
+  keywordId: string,
+  recentSnapshotIds: string[]
+): Promise<{ keyword: Keyword; sources: Source[] } | null> {
+  if (recentSnapshotIds.length === 0) return null;
+
+  const rows = (await sql`
+    SELECT k.* FROM keywords k
+    WHERE k.keyword_id = ${keywordId}
+      AND k.snapshot_id = ANY(${recentSnapshotIds})
+    ORDER BY k.created_at DESC
+    LIMIT 1
+  `) as Keyword[];
+
+  if (!rows[0]) return null;
+
+  const sources = await getSourcesByKeyword(rows[0].snapshot_id, keywordId);
+  if (sources.length === 0) return null;
+
+  return { keyword: rows[0], sources };
+}
+
 export async function getSnapshotById(
   snapshotId: string
 ): Promise<Snapshot | null> {

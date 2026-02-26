@@ -3,17 +3,16 @@ import type { NormalizedKeyword } from "./keywords";
 // ─── Weights (PRD §4.3) ───────────────────────────────────────────────────────
 
 const WEIGHTS = {
-  recency: 0.35,
-  frequency: 0.35,
+  recency: 0.45,
+  frequency: 0.20,
   authority: 0.20,
-  internal: 0.10,
+  internal: 0.15,
 };
 
 // ─── Tier authority score ─────────────────────────────────────────────────────
 
 const TIER_AUTHORITY: Record<string, number> = {
   P0_CURATED: 1.0,
-  P0_RELEASES: 0.9,
   P1_CONTEXT: 0.6,
   P2_RAW: 0.3,
   COMMUNITY: 0.2,
@@ -34,8 +33,8 @@ export function calculateScore(keyword: NormalizedKeyword): ScoreBreakdown {
   const ageMs = now - keyword.candidates.latestAt.getTime();
   const ageHours = ageMs / (1000 * 60 * 60);
 
-  // recency: 최신일수록 1.0, 48h 이후 0에 가까워짐
-  const recency = Math.max(0, 1 - ageHours / 48);
+  // recency: 지수 감쇠, 반감기 36h (6h→0.85, 24h→0.51, 48h→0.26, 72h→0.14)
+  const recency = Math.exp(-ageHours / 36);
 
   // frequency: 유니크 도메인 수 기반 (최대 10개 도메인 → 1.0)
   const frequency = Math.min(1, keyword.candidates.domains.size / 10);
