@@ -5,11 +5,14 @@ import OpenAI from "openai";
 
 const GENERIC_TERMS = new Set([
   // English standalone common nouns
-  "ai", "agent", "agents", "model", "models", "llm", "openai", "google",
+  "ai", "ml", "dl", "rl", "nlp",
+  "agent", "agents", "model", "models", "llm", "openai", "google",
   "anthropic", "meta", "inference", "reasoning", "benchmark", "dataset",
   "machine learning", "deep learning", "neural network", "language model",
   "large language model", "transformer", "fine-tuning", "prompt", "chatbot",
   "multimodal", "open source", "open-source",
+  // Generic AI compound phrases
+  "ai agents", "ai tools", "ai apps", "llm agents", "ml models", "ai models",
   // Korean
   "에이전트", "추론", "추론속도", "모델", "인공지능", "딥러닝", "머신러닝",
   "언어모델", "파인튜닝", "프롬프트", "챗봇", "오픈소스",
@@ -17,7 +20,10 @@ const GENERIC_TERMS = new Set([
 
 // 복합 구 전체가 이 단어들로만 구성되면 generic phrase로 간주
 const GENERIC_WORDS = new Set([
-  "ai", "agent", "agents", "model", "models", "llm", "llms", "tool", "tools",
+  // 2-char tech acronyms (short but generic alone)
+  "ai", "ml", "dl", "rl", "cv",
+  // Common tech nouns
+  "agent", "agents", "model", "models", "llm", "llms", "tool", "tools",
   "development", "application", "applications", "system", "systems",
   "powered", "enhanced", "based", "driven", "enabled", "focused",
   "platform", "service", "pipeline", "discussion", "use", "usage",
@@ -64,14 +70,17 @@ const GENERIC_WORDS = new Set([
   "글로벌", "기술", "공격",
 ]);
 
+// 전치사/관사: 의미 없는 1-2자 기능어 (ai, ml 같은 기술 약어는 별도 GENERIC_WORDS로 처리)
+const FUNCTION_WORDS = new Set(["a", "an", "in", "of", "at", "to", "by", "on", "as", "or"]);
+
 /** 복합 구(2단어 이상)의 모든 유의미한 단어가 generic이면 true.
- *  전치사/관사(≤2자)는 의미없으므로 체크에서 제외. */
+ *  전치사/관사만 제거하고, ai·ml 같은 2자 기술 약어는 GENERIC_WORDS에서 처리. */
 function isAllGenericPhrase(keyword: string): boolean {
   const words = keyword
     .toLowerCase()
     .replace(/[-]/g, " ")
     .split(/\s+/)
-    .filter((w) => w.length >= 3); // 전치사/관사(in, of, at...) 제외
+    .filter((w) => w.length >= 1 && !FUNCTION_WORDS.has(w));
   if (words.length < 2) return false;
   return words.every((w) => GENERIC_WORDS.has(w));
 }
@@ -117,6 +126,23 @@ function isArticleHeadline(keyword: string): boolean {
   if (/["'「」『』]/.test(keyword)) return true;          // 인용부호
   if (/\d+\s*[종개건가지]/.test(keyword)) return true;   // "53종", "10개"
   return false;
+}
+
+// ─── 미디어 매체명 필터 (뉴스 소스명이 키워드로 추출되는 것을 방지) ──────────
+const MEDIA_OUTLETS = new Set([
+  "techcrunch", "the verge", "wired", "engadget", "venturebeat",
+  "arstechnica", "ars technica", "the information", "bloomberg", "reuters",
+  "bbc", "cnn", "nytimes", "washington post", "hacker news", "hackernews",
+  "reddit", "youtube", "twitter", "linkedin", "producthunt", "product hunt",
+  "geekwire", "zdnet", "cnet", "techradar", "geeknews", "zdnet korea",
+  "mit technology review", "ben's bites", "semianalysis", "latent space",
+]);
+
+function isMediaOutlet(keyword: string): boolean {
+  const lower = keyword.toLowerCase();
+  return [...MEDIA_OUTLETS].some(
+    (outlet) => lower === outlet || lower.startsWith(outlet + " ") || lower.endsWith(" " + outlet)
+  );
 }
 
 // ─── 비AI 토픽 하드 필터 ────────────────────────────────────────────────────
@@ -213,9 +239,11 @@ Extract concise, search-friendly trending keywords. Each keyword should be somet
 ## SKIP — DO NOT EXTRACT
 - Article headlines or clickbait (anything reading like a sentence)
 - Generic AI: "AI 기반 X", "AI 모델 X", "AI 투자 X", "AI 학습용 X"
+- Generic abbreviations alone: "AI", "ML", "DL", "LLM", "NLP"
 - Policy, regulation, tax, GDP, market analysis
 - Non-AI topics: hardware manufacturing, automotive, CCTV, construction
-- Company name alone without product/event ("OpenAI", "Google")
+- Company name alone without product/event ("OpenAI", "Google", "Anthropic")
+- News media outlet names ("TechCrunch", "The Verge", "Wired", "VentureBeat", "Ars Technica")
 - More than 4 words = too long
 
 ## DUPLICATES
@@ -529,6 +557,11 @@ export async function normalizeKeywords(
       console.log(`[keywords] DROP(no_match)       : "${kw.keyword}"`);
       continue;
     }
+    // P0_CURATED(공식 블로그) 제외, 단일 소스 키워드 드롭 (Gushwork 류 방지)
+    if (candidate.tier !== "P0_CURATED" && candidate.domains.size < 2) {
+      console.log(`[keywords] DROP(single_domain)  : "${kw.keyword}" (domains=${candidate.domains.size})`);
+      continue;
+    }
     if (GENERIC_TERMS.has(kw.keyword.toLowerCase())) {
       console.log(`[keywords] DROP(generic_term)   : "${kw.keyword}"`);
       continue;
@@ -555,6 +588,10 @@ export async function normalizeKeywords(
     }
     if (isNonAiTopic(kw.keyword)) {
       console.log(`[keywords] DROP(non_ai_topic)  : "${kw.keyword}"`);
+      continue;
+    }
+    if (isMediaOutlet(kw.keyword)) {
+      console.log(`[keywords] DROP(media_outlet)   : "${kw.keyword}"`);
       continue;
     }
     if (hasKoreanTransliteration(kw.keyword)) {
