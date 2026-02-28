@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { getLatestSnapshot } from "@/lib/db/queries";
+import { getLatestSnapshot, getLatestSnapshotWithKeywords } from "@/lib/db/queries";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
 
 export async function GET() {
   try {
-    const snapshot = await getLatestSnapshot();
+    const snapshot =
+      (await getLatestSnapshotWithKeywords()) ??
+      (await getLatestSnapshot());
     if (!snapshot) {
       return NextResponse.json(
         { error: "No snapshot available yet" },

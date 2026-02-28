@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getLatestSnapshot,
+  getLatestSnapshotWithKeywords,
   getSnapshotById,
   getKeywordById,
   getKeywordInLatestSnapshot,
   getSourcesByKeyword,
 } from "@/lib/db/queries";
+import { classifySourceCategory } from "@/lib/pipeline/source_category";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
 
-type SourceType = "news" | "web" | "video" | "image";
-const SOURCE_TYPES: SourceType[] = ["news", "web", "video", "image"];
+type SourceType = "news" | "social" | "data";
+const SOURCE_TYPES: SourceType[] = ["news", "social", "data"];
 
 export async function GET(
   req: NextRequest,
@@ -31,7 +32,7 @@ export async function GET(
       }
       snapshotId = snap.snapshot_id;
     } else {
-      const latest = await getLatestSnapshot();
+      const latest = await getLatestSnapshotWithKeywords();
       if (!latest) {
         return NextResponse.json(
           { error: "No snapshot available yet" },
@@ -49,12 +50,21 @@ export async function GET(
       return NextResponse.json({ error: "Keyword not found" }, { status: 404 });
     }
 
-    const sources = await getSourcesByKeyword(snapshotId, id);
+    const sources = await getSourcesByKeyword(keyword.snapshot_id, id);
+
+    const categorized: Record<SourceType, typeof sources> = {
+      news: [],
+      social: [],
+      data: [],
+    };
+    for (const source of sources) {
+      const category = classifySourceCategory(source);
+      categorized[category].push(source);
+    }
 
     const grouped = SOURCE_TYPES.map((type) => ({
       type,
-      items: sources
-        .filter((s) => s.type === type)
+      items: categorized[type]
         .map((s) => ({
           title: lang === "en"
             ? (s.title_en || s.title)

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLatestSnapshot, getTopKeywords } from "@/lib/db/queries";
+import { getLatestSnapshotWithKeywords, getTopKeywords } from "@/lib/db/queries";
 import { normalizePrimaryType } from "@/lib/pipeline/source_category";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(50, Math.max(1, parseInt(limitParam ?? "10", 10)));
     const lang = url.searchParams.get("lang") === "en" ? "en" : "ko";
 
-    const snapshot = await getLatestSnapshot();
+    const snapshot = await getLatestSnapshotWithKeywords();
     if (!snapshot) {
       return NextResponse.json(
         { error: "No snapshot available yet" },

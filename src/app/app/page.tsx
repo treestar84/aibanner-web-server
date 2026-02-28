@@ -1,4 +1,4 @@
-import { getLatestSnapshot, getTopKeywords } from "@/lib/db/queries";
+import { getLatestSnapshotWithKeywords, getTopKeywords } from "@/lib/db/queries";
 import Link from "next/link";
 import Image from "next/image";
 
@@ -35,7 +35,7 @@ function DeltaBadge({ delta, isNew }: { delta: number; isNew: boolean }) {
 }
 
 export default async function TrendsPage() {
-  const snapshot = await getLatestSnapshot();
+  const snapshot = await getLatestSnapshotWithKeywords();
 
   if (!snapshot) {
     return (

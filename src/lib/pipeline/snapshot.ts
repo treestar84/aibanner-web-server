@@ -14,6 +14,7 @@ import { batchExtractOgImages } from "./og-parser";
 import { determinePrimaryType, pickPrimarySource } from "./source_category";
 import {
   insertSnapshot,
+  deleteSnapshotIfEmpty,
   insertKeyword,
   insertSource,
   getPreviousRanks,
@@ -230,9 +231,8 @@ async function processKeyword(
   const sourcesMap = await collectSources(kw.keyword);
   const allSources = [
     ...sourcesMap.news,
-    ...sourcesMap.web,
-    ...sourcesMap.video,
-    ...sourcesMap.image,
+    ...sourcesMap.social,
+    ...sourcesMap.data,
   ];
 
   const urlsToFetch = allSources.filter((s) => !s.imageUrl).slice(0, 10).map((s) => s.url);
@@ -286,7 +286,7 @@ async function processKeyword(
       insertSource({
         snapshot_id: snapshotId,
         keyword_id: kw.keywordId,
-        type: type as "news" | "web" | "video" | "image",
+        type: type as "news" | "social" | "data",
         title: source.title,
         url: source.url,
         domain: source.domain,
@@ -384,6 +384,12 @@ export async function runSnapshotPipeline(): Promise<{
     .map((item, idx) => ({ ...item, rank: idx + 1 }))
     .slice(0, RANKING_CANDIDATE_LIMIT);
 
+  if (finalRanked.length === 0) {
+    throw new Error(
+      "[snapshot] No ranked keywords generated; aborting snapshot write to avoid empty snapshot."
+    );
+  }
+
   // 7) 스냅샷 저장
   console.log("[snapshot] Step 7: Saving snapshot...");
   const now = new Date();
@@ -450,6 +456,13 @@ export async function runSnapshotPipeline(): Promise<{
     } else {
       console.error("[snapshot] Lightweight keyword save failed:", r.reason);
     }
+  }
+
+  if (keywordCount + lightweightCount === 0) {
+    const deleted = await deleteSnapshotIfEmpty(snapshotId);
+    throw new Error(
+      `[snapshot] No keywords were persisted for snapshot ${snapshotId} (deletedEmptySnapshot=${deleted}).`
+    );
   }
 
   const elapsedMs = Date.now() - startedAt;

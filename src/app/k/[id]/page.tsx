@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import {
-  getLatestSnapshot,
   getKeywordInLatestSnapshot,
   getSourcesByKeyword,
 } from "@/lib/db/queries";
@@ -8,6 +7,7 @@ import type { Source } from "@/lib/db/queries";
 import Link from "next/link";
 import Image from "next/image";
 import type { Metadata } from "next";
+import { classifySourceCategory } from "@/lib/pipeline/source_category";
 
 export const revalidate = 900; // ISR: 15분
 
@@ -31,9 +31,8 @@ export async function generateMetadata({
 
 const TYPE_LABELS: Record<string, string> = {
   news: "뉴스",
-  web: "웹",
-  video: "영상",
-  image: "이미지",
+  social: "소셜",
+  data: "데이터",
 };
 
 function SourceCard({ source }: { source: Source }) {
@@ -87,19 +86,27 @@ export default async function KeywordDetailPage({
 }) {
   const { id } = await params;
 
-  const snapshot = await getLatestSnapshot();
-  if (!snapshot) notFound();
-
   const keyword = await getKeywordInLatestSnapshot(id);
   if (!keyword) notFound();
 
-  const sources = await getSourcesByKeyword(snapshot.snapshot_id, id);
+  const sources = await getSourcesByKeyword(keyword.snapshot_id, id);
+  const categorized: Record<"news" | "social" | "data", Source[]> = {
+    news: [],
+    social: [],
+    data: [],
+  };
+  for (const source of sources) {
+    const category = classifySourceCategory(source);
+    categorized[category].push(source);
+  }
 
-  const grouped = (["news", "web", "video", "image"] as const).map((type) => ({
-    type,
-    label: TYPE_LABELS[type],
-    items: sources.filter((s) => s.type === type),
-  })).filter((g) => g.items.length > 0);
+  const grouped = (["news", "social", "data"] as const)
+    .map((type) => ({
+      type,
+      label: TYPE_LABELS[type],
+      items: categorized[type],
+    }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">

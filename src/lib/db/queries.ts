@@ -35,7 +35,7 @@ export interface Source {
   id: number;
   snapshot_id: string;
   keyword_id: string;
-  type: "news" | "web" | "video" | "image";
+  type: "news" | "social" | "data" | "web" | "video" | "image";
   title: string;
   url: string;
   domain: string;
@@ -53,6 +53,19 @@ export async function getLatestSnapshot(): Promise<Snapshot | null> {
   const rows = (await sql`
     SELECT * FROM snapshots
     ORDER BY created_at DESC
+    LIMIT 1
+  `) as Snapshot[];
+  return rows[0] ?? null;
+}
+
+export async function getLatestSnapshotWithKeywords(): Promise<Snapshot | null> {
+  const rows = (await sql`
+    SELECT s.* FROM snapshots s
+    WHERE EXISTS (
+      SELECT 1 FROM keywords k
+      WHERE k.snapshot_id = s.snapshot_id
+    )
+    ORDER BY s.created_at DESC
     LIMIT 1
   `) as Snapshot[];
   return rows[0] ?? null;
@@ -103,6 +116,20 @@ export async function insertSnapshot(snapshot: Omit<Snapshot, "created_at">): Pr
     VALUES (${snapshot.snapshot_id}, ${snapshot.updated_at_utc}, ${snapshot.next_update_at_utc})
     ON CONFLICT (snapshot_id) DO NOTHING
   `;
+}
+
+export async function deleteSnapshotIfEmpty(snapshotId: string): Promise<boolean> {
+  const rows = (await sql`
+    DELETE FROM snapshots s
+    WHERE s.snapshot_id = ${snapshotId}
+      AND NOT EXISTS (
+        SELECT 1 FROM keywords k
+        WHERE k.snapshot_id = s.snapshot_id
+      )
+    RETURNING s.snapshot_id
+  `) as { snapshot_id: string }[];
+
+  return rows.length > 0;
 }
 
 // ─── Keyword queries ──────────────────────────────────────────────────────────

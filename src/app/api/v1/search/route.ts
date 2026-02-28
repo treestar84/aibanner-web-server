@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getLatestSnapshot,
+  getLatestSnapshotWithKeywords,
   getSourcesByKeyword,
   searchKeywordsByText,
   incrementSearchCount,
 } from "@/lib/db/queries";
 import { collectSources } from "@/lib/pipeline/tavily";
+import { classifySourceCategory } from "@/lib/pipeline/source_category";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
 
-type SourceType = "news" | "web" | "video" | "image";
-const SOURCE_TYPES: SourceType[] = ["news", "web", "video", "image"];
+type SourceType = "news" | "social" | "data";
+const SOURCE_TYPES: SourceType[] = ["news", "social", "data"];
 
 export async function GET(req: NextRequest) {
   try {
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
     );
 
     // Get latest snapshot
-    const snapshot = await getLatestSnapshot();
+    const snapshot = await getLatestSnapshotWithKeywords();
 
     if (snapshot) {
       // Try DB search first
@@ -44,10 +45,19 @@ export async function GET(req: NextRequest) {
           // Lightweight 키워드(11~20)일 수 있으므로 Tavily fallback으로 계속 진행
           console.log(`[search] No stored sources for "${keyword.keyword}", fallback to Tavily`);
         } else {
+          const categorized: Record<SourceType, typeof sources> = {
+            news: [],
+            social: [],
+            data: [],
+          };
+          for (const source of sources) {
+            const category = classifySourceCategory(source);
+            categorized[category].push(source);
+          }
+
           const grouped = SOURCE_TYPES.map((type) => ({
             type,
-            items: sources
-              .filter((s) => s.type === type)
+            items: categorized[type]
               .slice(0, limit)
               .map((s) => ({
                 title: lang === "en"
@@ -94,7 +104,8 @@ export async function GET(req: NextRequest) {
 
     const firstSnippet =
       tavilySources.news[0]?.snippet ??
-      tavilySources.web[0]?.snippet ??
+      tavilySources.social[0]?.snippet ??
+      tavilySources.data[0]?.snippet ??
       "";
 
     return NextResponse.json({
