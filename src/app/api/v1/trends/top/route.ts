@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLatestSnapshot, getTopKeywords } from "@/lib/db/queries";
+import { normalizePrimaryType } from "@/lib/pipeline/source_category";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -9,6 +10,7 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const limitParam = url.searchParams.get("limit");
     const limit = Math.min(50, Math.max(1, parseInt(limitParam ?? "10", 10)));
+    const lang = url.searchParams.get("lang") === "en" ? "en" : "ko";
 
     const snapshot = await getLatestSnapshot();
     if (!snapshot) {
@@ -26,6 +28,12 @@ export async function GET(req: NextRequest) {
         updatedAt: snapshot.updated_at_utc,
         nextUpdateAt: snapshot.next_update_at_utc,
         items: keywords.map((kw) => ({
+          primaryType: normalizePrimaryType(kw.primary_type, {
+            type: kw.primary_type,
+            domain: kw.top_source_domain,
+            url: kw.top_source_url,
+            title: kw.top_source_title,
+          }),
           id: kw.keyword_id,
           rank: kw.rank,
           keyword: kw.keyword,
@@ -38,8 +46,7 @@ export async function GET(req: NextRequest) {
             authority: kw.score_authority,
             internal: kw.score_internal,
           },
-          summaryShort: kw.summary_short,
-          primaryType: kw.primary_type,
+          summaryShort: lang === "en" ? kw.summary_short_en || kw.summary_short : kw.summary_short,
           topSource: kw.top_source_url
             ? {
                 title: kw.top_source_title,

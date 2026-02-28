@@ -1,5 +1,6 @@
 import type { RssItem } from "./rss";
 import OpenAI from "openai";
+import { isExactlyExcludedKeyword } from "./keyword_exclusions";
 
 // ─── Generic term filter (hard filter — safety net after LLM extraction) ─────
 
@@ -540,8 +541,15 @@ export async function normalizeKeywords(
 
   // 2. LLM 키워드 추출 + 중복 병합
   const rawLlmKeywords = await extractKeywordsViaLLM(batches);
-  const llmKeywords = deduplicateKeywords(rawLlmKeywords);
-  console.log(`[keywords] After dedup: ${rawLlmKeywords.length} → ${llmKeywords.length} keywords`);
+  const dedupedLlmKeywords = deduplicateKeywords(rawLlmKeywords);
+  console.log(`[keywords] After dedup: ${rawLlmKeywords.length} → ${dedupedLlmKeywords.length} keywords`);
+
+  const llmKeywords = dedupedLlmKeywords.filter((kw) => {
+    if (!isExactlyExcludedKeyword(kw.keyword)) return true;
+    console.log(`[keywords] DROP(exact_exclusion): "${kw.keyword}"`);
+    return false;
+  });
+  console.log(`[keywords] After exact_exclusion: ${dedupedLlmKeywords.length} → ${llmKeywords.length} keywords`);
 
   // 3. 아이템 매칭 → scoring 메타데이터 복원
   const candidateMap = matchKeywordsToItems(llmKeywords, items);

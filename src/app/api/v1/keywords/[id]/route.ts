@@ -21,6 +21,7 @@ export async function GET(
     const { id } = await params;
     const url = new URL(req.url);
     const snapshotIdParam = url.searchParams.get("snapshotId");
+    const lang = url.searchParams.get("lang") === "en" ? "en" : "ko";
 
     let snapshotId: string;
     if (snapshotIdParam) {
@@ -55,7 +56,9 @@ export async function GET(
       items: sources
         .filter((s) => s.type === type)
         .map((s) => ({
-          title: s.title,
+          title: lang === "en"
+            ? (s.title_en || s.title)
+            : (s.title_ko || s.title),
           url: s.url,
           source: s.domain,
           publishedAt: s.published_at_utc,
@@ -70,7 +73,9 @@ export async function GET(
         id: keyword.keyword_id,
         keyword: keyword.keyword,
         updatedAt: keyword.created_at,
-        summary: keyword.summary_short,
+        summary: lang === "en"
+          ? (keyword.summary_short_en || keyword.summary_short)
+          : keyword.summary_short,
         sources: grouped,
       },
       {
