@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { runSnapshotPipeline } from "@/lib/pipeline/snapshot";
 
 export const runtime = "nodejs";
-export const maxDuration = 60; // Vercel Free 플랜 최대값
+export const maxDuration = 300; // Hobby 플랜 함수 허용치 내에서 여유 확보
 
 export async function GET(req: NextRequest) {
   // Vercel Cron 인증 헤더 또는 CRON_SECRET 검증
@@ -17,13 +17,16 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const startedAt = Date.now();
     const result = await runSnapshotPipeline();
+    const durationMs = Date.now() - startedAt;
     return NextResponse.json({
       ok: true,
       snapshotId: result.snapshotId,
       keywordCount: result.keywordCount,
       reusedCount: result.reusedCount,
       newCount: result.keywordCount - result.reusedCount,
+      durationMs,
     });
   } catch (err) {
     console.error("[cron/snapshot]", err);

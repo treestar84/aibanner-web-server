@@ -30,6 +30,32 @@ function extractDomain(url: string): string {
   }
 }
 
+function parsePositiveIntEnv(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed < min) return min;
+  if (parsed > max) return max;
+  return parsed;
+}
+
+const TAVILY_NEWS_RESULTS = parsePositiveIntEnv(
+  process.env.TAVILY_NEWS_RESULTS,
+  5,
+  1,
+  10
+);
+const TAVILY_WEB_RESULTS = parsePositiveIntEnv(
+  process.env.TAVILY_WEB_RESULTS,
+  5,
+  1,
+  10
+);
+
 // ─── Queries (news + web only) ────────────────────────────────────────────────
 
 async function fetchNews(
@@ -91,8 +117,8 @@ export async function collectSources(
 ): Promise<Record<SourceType, TavilySource[]>> {
   const client = getClient();
   const [news, web] = await Promise.all([
-    fetchNews(client, keyword),
-    fetchWeb(client, keyword),
+    fetchNews(client, keyword, TAVILY_NEWS_RESULTS),
+    fetchWeb(client, keyword, TAVILY_WEB_RESULTS),
   ]);
   return { news, web, video: [], image: [] };
 }

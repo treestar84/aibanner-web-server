@@ -19,7 +19,7 @@ export async function GET() {
         latestSnapshotId: snapshot.snapshot_id,
         updatedAt: snapshot.updated_at_utc,
         nextUpdateAt: snapshot.next_update_at_utc,
-        scheduleKst: ["09:00", "12:00", "18:00", "21:00"],
+        scheduleKst: ["09:17", "18:17"],
       },
       {
         headers: {

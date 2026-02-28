@@ -2,19 +2,74 @@ name: Snapshot Pipeline
 
 on:
   schedule:
-    - cron: "0 0 * * *"   # KST 09:00 (UTC 00:00)
-    - cron: "0 9 * * *"   # KST 18:00 (UTC 09:00)
-  workflow_dispatch:       # 수동 실행 버튼
+    - cron: "17 0 * * *"   # KST 09:17 (UTC 00:17)
+    - cron: "17 9 * * *"   # KST 18:17 (UTC 09:17)
+  workflow_dispatch:
+
+concurrency:
+  group: snapshot-pipeline
+  cancel-in-progress: false
 
 jobs:
   run-snapshot:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Trigger snapshot pipeline
         env:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -f -X GET "${APP_URL}/api/cron/snapshot" \
-            -H "Authorization: Bearer ${CRON_SECRET}" \
-            --max-time 300
+          set -euo pipefail
+
+          if [ -z "${APP_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "APP_URL or CRON_SECRET is missing"
+            exit 1
+          fi
+
+          endpoint="${APP_URL%/}/api/cron/snapshot"
+          body_file="$(mktemp)"
+          success=0
+          status="000"
+
+          for attempt in 1 2 3; do
+            echo "[snapshot] attempt=${attempt} endpoint=${endpoint}"
+            status="$(curl -sS \
+              -o "${body_file}" \
+              -w "%{http_code}" \
+              -X GET "${endpoint}" \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
+              --max-time 300 || true)"
+
+            if [ "${status}" -ge 200 ] && [ "${status}" -lt 300 ]; then
+              success=1
+              break
+            fi
+
+            # 4xx(429 제외)는 재시도해도 해결되지 않을 가능성이 높아 즉시 실패
+            if [ "${status}" -ge 400 ] && [ "${status}" -lt 500 ] && [ "${status}" -ne 429 ]; then
+              break
+            fi
+
+            sleep $((attempt * 10))
+          done
+
+          {
+            echo "## Snapshot Trigger Result"
+            echo ""
+            echo "- Endpoint: \`${endpoint}\`"
+            echo "- HTTP Status: \`${status}\`"
+            echo "- Success: \`${success}\`"
+            echo ""
+            echo "### Response"
+            echo '```json'
+            cat "${body_file}"
+            echo ""
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${success}" -ne 1 ]; then
+            echo "[snapshot] failed with status=${status}"
+            cat "${body_file}"
+            exit 1
+          fi

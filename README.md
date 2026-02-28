@@ -39,7 +39,8 @@ src/
 
 ## 배치 스케줄 (KST)
 
-- 09:00 / 12:00 / 18:00 / 21:00
+- 09:17 / 18:17 (현재 테스트 운영)
+- 스케줄 실행 주체: GitHub Actions (`.github/workflows/cron.yml`)
 
 ## 환경 변수 설정
 
@@ -47,6 +48,14 @@ src/
 cp .env.example .env.local
 # .env.local 편집 후 값 채우기
 ```
+
+## 키워드 제외 설정
+
+`src/config/keyword-exclusions.json`의 `exact` 배열에 제외할 키워드를 추가하세요.
+
+- 비교 방식: 대소문자 무시 + 공백 정규화 후 전체 문자열 정확 일치
+- 예시: `claude code`는 제외되지만 `claude code 5.3`, `claude code swammode`는 제외되지 않음
+- 예시: `nano banana`는 제외되지만 `nano banana2`는 제외되지 않음
 
 ## 개발 실행
 

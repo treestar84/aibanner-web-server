@@ -22,7 +22,8 @@ export interface Keyword {
   score_authority: number;
   score_internal: number;
   summary_short: string;
-  primary_type: "news" | "web" | "video" | "image";
+  summary_short_en: string;
+  primary_type: "news" | "social" | "data" | "web" | "video" | "image";
   top_source_title: string | null;
   top_source_url: string | null;
   top_source_domain: string | null;
@@ -41,6 +42,8 @@ export interface Source {
   published_at_utc: string | null;
   snippet: string | null;
   image_url: string;
+  title_ko: string | null;
+  title_en: string | null;
   created_at: string;
 }
 
@@ -145,14 +148,14 @@ export async function insertKeyword(keyword: Omit<Keyword, "created_at">): Promi
     INSERT INTO keywords (
       snapshot_id, keyword_id, keyword, rank, delta_rank, is_new,
       score, score_recency, score_frequency, score_authority, score_internal,
-      summary_short, primary_type,
+      summary_short, summary_short_en, primary_type,
       top_source_title, top_source_url, top_source_domain, top_source_image_url
     ) VALUES (
       ${keyword.snapshot_id}, ${keyword.keyword_id}, ${keyword.keyword},
       ${keyword.rank}, ${keyword.delta_rank}, ${keyword.is_new},
       ${keyword.score}, ${keyword.score_recency}, ${keyword.score_frequency},
       ${keyword.score_authority}, ${keyword.score_internal},
-      ${keyword.summary_short}, ${keyword.primary_type},
+      ${keyword.summary_short}, ${keyword.summary_short_en}, ${keyword.primary_type},
       ${keyword.top_source_title}, ${keyword.top_source_url},
       ${keyword.top_source_domain}, ${keyword.top_source_image_url}
     )
@@ -201,11 +204,50 @@ export async function insertSource(
   source: Omit<Source, "id" | "created_at">
 ): Promise<void> {
   await sql`
-    INSERT INTO sources (snapshot_id, keyword_id, type, title, url, domain, published_at_utc, snippet, image_url)
+    INSERT INTO sources (snapshot_id, keyword_id, type, title, url, domain, published_at_utc, snippet, image_url, title_ko, title_en)
     VALUES (
       ${source.snapshot_id}, ${source.keyword_id}, ${source.type},
       ${source.title}, ${source.url}, ${source.domain},
-      ${source.published_at_utc}, ${source.snippet}, ${source.image_url}
+      ${source.published_at_utc}, ${source.snippet}, ${source.image_url},
+      ${source.title_ko ?? null}, ${source.title_en ?? null}
     )
+    ON CONFLICT (snapshot_id, keyword_id, type, url)
+    DO UPDATE SET
+      title = EXCLUDED.title,
+      domain = EXCLUDED.domain,
+      published_at_utc = EXCLUDED.published_at_utc,
+      snippet = EXCLUDED.snippet,
+      image_url = EXCLUDED.image_url,
+      title_ko = EXCLUDED.title_ko,
+      title_en = EXCLUDED.title_en
+  `;
+}
+
+// ─── Search queries ───────────────────────────────────────────────────────────
+
+export async function searchKeywordsByText(
+  query: string,
+  snapshotId: string,
+  limit = 5
+): Promise<Keyword[]> {
+  const pattern = `%${query}%`;
+  return (await sql`
+    SELECT DISTINCT k.* FROM keywords k
+    LEFT JOIN keyword_aliases ka ON k.keyword_id = ka.canonical_keyword_id
+    WHERE k.snapshot_id = ${snapshotId}
+      AND (k.keyword ILIKE ${pattern} OR ka.alias ILIKE ${pattern})
+    ORDER BY k.rank ASC
+    LIMIT ${limit}
+  `) as Keyword[];
+}
+
+export async function incrementSearchCount(query: string): Promise<void> {
+  const normalized = query.toLowerCase();
+  await sql`
+    INSERT INTO search_counts (query, count, last_searched_at)
+    VALUES (${normalized}, 1, NOW())
+    ON CONFLICT (query) DO UPDATE
+    SET count = search_counts.count + 1,
+        last_searched_at = NOW()
   `;
 }
