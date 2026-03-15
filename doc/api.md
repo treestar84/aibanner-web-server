@@ -20,7 +20,7 @@
 - 응답 포맷은 JSON입니다.
 - 시간 필드(`updatedAt`, `nextUpdateAt`, `publishedAt`)는 ISO-8601 UTC 문자열입니다.
 - `lang` 쿼리는 `en`일 때만 영어, 그 외 값은 기본 `ko`로 처리됩니다.
-- 소스 타입 값은 `news | web | video | image`입니다.
+- 소스 타입 값은 `news | social | data`입니다. (`web | video | image`는 레거시 응답에서만 나타날 수 있음)
 
 캐시 헤더:
 
@@ -106,6 +106,62 @@ curl "http://localhost:3000/api/v1/trends/top?limit=10&lang=ko"
 - `topSource`는 없을 수 있어 `null`이 될 수 있습니다.
 - `topSource.imageUrl`이 없으면 기본 이미지 경로가 내려갑니다.
 - `primaryType` 값은 `news | social | data` 입니다.
+
+에러:
+
+- `404`: `{ "error": "No snapshot available yet" }`
+- `500`: `{ "error": "Internal server error" }`
+
+### 3.2-1 `GET /api/v1/trends/hot`
+
+조회수 기반 핫 키워드 목록을 반환합니다.
+
+핵심 규칙:
+
+- 기준 집합: 최근 `RETENTION_KEYWORD_VIEW_DAYS`일(기본 3일) 내 `Top10`에 포함된 키워드
+- 정렬: `viewCount DESC` → `lastViewedAt DESC` → `rank ASC`
+- `viewCount`는 `POST /api/v1/keywords/{id}/view` 호출 누적값입니다.
+
+쿼리 파라미터:
+
+- `limit` (선택): 기본 `10`, 최대 `50`
+- `lang` (선택): `ko`(기본) 또는 `en`
+
+요청 예시:
+
+```bash
+curl "http://localhost:3000/api/v1/trends/hot?limit=10&lang=ko"
+```
+
+응답 예시:
+
+```json
+{
+  "snapshotId": "20260301_1817_KST",
+  "updatedAt": "2026-03-01T09:17:10.000Z",
+  "lifecycleDays": 3,
+  "items": [
+    {
+      "id": "claude_code_2",
+      "keyword": "Claude Code 2",
+      "rank": 3,
+      "deltaRank": 1,
+      "isNew": false,
+      "viewCount": 1284,
+      "lastViewedAt": "2026-03-01T10:20:02.000Z",
+      "summaryShort": "요약...",
+      "primaryType": "news",
+      "topSource": {
+        "title": "Release notes ...",
+        "url": "https://example.com",
+        "source": "example.com",
+        "snippet": null,
+        "imageUrl": "https://example.com/image.jpg"
+      }
+    }
+  ]
+}
+```
 
 에러:
 
@@ -199,7 +255,7 @@ curl "http://localhost:3000/api/v1/search?q=claude%20code&limit=5&lang=ko"
   "bullets": [],
   "sources": [
     {
-      "type": "web",
+      "type": "social",
       "items": [
         {
           "title": "문서 제목",
@@ -281,10 +337,40 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 - `401`: `{ "error": "Unauthorized" }`
 - `500`: `{ "error": "Pipeline failed", "detail": "..." }`
 
+### 3.6 `POST /api/v1/keywords/{id}/view`
+
+특정 키워드 상세 조회 이벤트를 누적합니다.
+
+동작:
+
+- `keyword_id`가 최신 스냅샷 기준 유효한 경우 `keyword_view_counts.view_count` 증가
+- 유효하지 않은 ID는 `404`
+
+요청 예시:
+
+```bash
+curl -X POST "http://localhost:3000/api/v1/keywords/claude_code_2/view"
+```
+
+응답 예시:
+
+```json
+{
+  "ok": true,
+  "keywordId": "claude_code_2"
+}
+```
+
+에러:
+
+- `400`: `{ "error": "keyword id is required" }`
+- `404`: `{ "error": "Keyword not found" }`
+- `500`: `{ "error": "Internal server error" }`
+
 ## 4. 클라이언트 구현용 최소 타입 예시
 
 ```ts
-type SourceType = "news" | "web" | "video" | "image";
+type SourceType = "news" | "social" | "data";
 
 interface SourceItem {
   title: string;

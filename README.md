@@ -1,71 +1,130 @@
-# AI Trend Widget — Server
+# AI Trend Widget - Web Server
 
-AI 트렌드 실시간 키워드 랭킹 서비스 서버.
-Next.js + Vercel Functions + Vercel Postgres + Vercel KV
+AI 트렌드 키워드를 수집/랭킹/요약해서 웹 화면과 API로 제공하는 Next.js 서버입니다.
 
-## Stack
+## 사용자 입장에서 이 서비스로 할 수 있는 것
 
-- **Framework**: Next.js 15 (App Router)
-- **Hosting**: Vercel
-- **DB**: Vercel Postgres
-- **Cache**: Vercel KV (Redis)
-- **Search**: Tavily Search API
-- **AI**: OpenAI (gpt-4o-mini)
+- `/app`에서 최신 **AI 트렌드 Top10**을 본다.
+- 각 키워드를 눌러 `/k/:id`에서 **왜 뜨는지(요약) + 근거 출처(news/social/data)**를 본다.
+- 앱/위젯/외부 클라이언트는 REST API로 같은 데이터를 가져온다.
+- 검색어가 DB에 없으면 Tavily fallback으로 관련 출처를 즉시 보여준다.
 
-## 구조
+## 현재 구현 상태 (코드 기준)
 
-```
-src/
-├── app/
-│   ├── app/          # /app  - Top10 트렌드 목록 (SSR)
-│   ├── k/[id]/       # /k/:id - 키워드 상세 (SSR)
-│   └── api/
-│       ├── v1/       # REST API (Flutter/웹 공용)
-│       └── cron/     # 배치 파이프라인
-└── lib/
-    ├── db/           # Vercel Postgres 쿼리
-    ├── kv/           # Vercel KV 캐시
-    └── pipeline/     # 데이터 수집/처리 파이프라인
-```
+- 상태: **동작 중인 MVP+ 운영형 구조**
+- 스냅샷: Top20 생성, Top10은 상세 저장, 11~20은 lightweight 저장
+- 언어: `ko/en` 키워드/제목/요약 지원
+- 크론: `GET|POST /api/cron/snapshot` + `CRON_SECRET` 인증
+- 운영 스케줄: GitHub Actions 기준 **KST 09:17 / 18:17**
+- 보관 정책: retention 실행(상세 90일, 집계 365일 기본)
 
-## API Endpoints
+## 사용자 기능과 엔드포인트
 
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | `/api/v1/meta` | 최신 스냅샷 메타 |
-| GET | `/api/v1/trends/top?limit=10` | Top10 트렌드 |
-| GET | `/api/v1/keywords/:id?snapshotId=` | 키워드 상세 |
-| POST | `/api/cron/snapshot` | 스냅샷 생성 (cron) |
+| 기능 | 경로 | 설명 |
+|---|---|---|
+| 트렌드 목록 페이지 | `/app` | 최신 스냅샷 Top10 SSR 렌더링 |
+| 키워드 상세 페이지 | `/k/:id` | 요약 + 출처 카드(news/social/data) |
+| 최신 메타 | `GET /api/v1/meta` | 최신 스냅샷 ID/업데이트/다음 업데이트 |
+| 랭킹 목록 | `GET /api/v1/trends/top?limit=10&lang=ko` | Top N 키워드 목록 |
+| 핫 키워드 | `GET /api/v1/trends/hot?limit=10&lang=ko` | 최근 3일 생존 키워드의 조회수 기반 랭킹 |
+| 키워드 상세 API | `GET /api/v1/keywords/:id?lang=ko` | 특정 키워드 상세 데이터 |
+| 자유 검색 | `GET /api/v1/search?q=...&lang=ko` | DB 검색 우선, 미매칭 시 Tavily fallback |
+| 스냅샷 실행 | `GET/POST /api/cron/snapshot` | 수집~랭킹~저장~retention 배치 실행 |
 
-## 배치 스케줄 (KST)
-
-- 09:17 / 18:17 (현재 테스트 운영)
-- 스케줄 실행 주체: GitHub Actions (`.github/workflows/cron.yml`)
-
-## 환경 변수 설정
+## API 빠른 사용 예시
 
 ```bash
-cp .env.example .env.local
-# .env.local 편집 후 값 채우기
+# 1) 최신 스냅샷 메타
+curl "http://localhost:3000/api/v1/meta"
+
+# 2) 트렌드 Top10
+curl "http://localhost:3000/api/v1/trends/top?limit=10&lang=ko"
+
+# 3) 키워드 상세
+curl "http://localhost:3000/api/v1/keywords/<keyword_id>?lang=ko"
+
+# 4) 핫 키워드
+curl "http://localhost:3000/api/v1/trends/hot?limit=10&lang=ko"
+
+# 5) 검색
+curl "http://localhost:3000/api/v1/search?q=claude%20code&lang=ko"
+
+# 6) 수동 크론 실행
+curl -H "Authorization: Bearer $CRON_SECRET" \
+  "http://localhost:3000/api/cron/snapshot"
 ```
 
-## 키워드 제외 설정
+## 프로젝트 구조 (핵심)
 
-`src/config/keyword-exclusions.json`의 `exact` 배열에 제외할 키워드를 추가하세요.
+```text
+src/
+  app/
+    app/page.tsx                 # /app 트렌드 페이지
+    k/[id]/page.tsx              # /k/:id 상세 페이지
+    api/
+      v1/                        # 클라이언트용 REST API
+      cron/snapshot/route.ts     # 배치 실행 엔드포인트
+  lib/
+    db/                          # Neon 쿼리/스키마
+    pipeline/                    # 수집/정규화/스코어/요약/보관
+  config/keyword-exclusions.json # exact 제외 키워드
+scripts/db/migrate.ts            # DB 마이그레이션
+```
 
-- 비교 방식: 대소문자 무시 + 공백 정규화 후 전체 문자열 정확 일치
-- 예시: `claude code`는 제외되지만 `claude code 5.3`, `claude code swammode`는 제외되지 않음
-- 예시: `nano banana`는 제외되지만 `nano banana2`는 제외되지 않음
+## 파이프라인 요약
 
-## 개발 실행
+1. 다중 소스 수집: RSS/HN/GDELT/GitHub/YouTube/Changelog
+2. 키워드 추출/정규화: OpenAI + 하드 필터
+3. 점수화/랭킹: recency/frequency/authority/internal
+4. 소스 수집: Tavily + OG 이미지 보강 + 타입 분류
+5. 저장: snapshots/keywords/sources
+6. 정리: retention + daily stats 집계
+
+## 로컬 실행
 
 ```bash
 npm install
 npm run dev
 ```
 
+브라우저:
+
+- `http://localhost:3000/app`
+
 ## DB 마이그레이션
 
 ```bash
 npm run db:migrate
 ```
+
+## 필수 환경 변수
+
+최소 실행 기준:
+
+- `DATABASE_URL` (또는 `POSTGRES_URL`)
+- `TAVILY_API_KEY`
+- `OPENAI_API_KEY`
+
+권장:
+
+- `CRON_SECRET`
+- `OPENAI_MODEL` (기본 `gpt-4o-mini`)
+- `GITHUB_TOKEN` (GitHub 소스 수집 품질/한도 개선)
+- `PIPELINE_*`, `TAVILY_*`, `RETENTION_*` 튜닝 값
+
+`.env.example`를 템플릿으로 복사 후 사용하세요.
+
+```bash
+cp .env.example .env.local
+```
+
+## 운영 참고
+
+- 스냅샷 자동 트리거: `.github/workflows/cron.yml`
+- API 상세 문서: `doc/api.md`
+- 파이프라인 상세 문서: `doc/pipeline.md`
+
+## 주의 (현 시점 코드 기준)
+
+- `keyword_aliases` 테이블은 검색 join에 쓰이지만 alias 저장 로직은 아직 연결되지 않았습니다.
+- `.env.example`에 일부 미사용 키가 남아 있습니다(`UPSTASH_*`, `RATE_LIMIT_RPM`, `TAVILY_WEB_RESULTS`).

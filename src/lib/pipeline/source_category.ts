@@ -11,11 +11,31 @@ const SOCIAL_DOMAINS = new Set([
   "x.com",
   "twitter.com",
   "t.co",
+  "tweetdeck.twitter.com",
+  "mobile.twitter.com",
   "linkedin.com",
   "lnkd.in",
   "threads.net",
   "reddit.com",
   "redd.it",
+  "old.reddit.com",
+  "news.ycombinator.com",
+  "hn.algolia.com",
+  "dev.to",
+  "clien.net",
+  "facebook.com",
+  "fb.com",
+  "instagram.com",
+  "instagr.am",
+  "tiktok.com",
+  "vm.tiktok.com",
+  "news.hada.io",
+  "geeksforgeeks.org",
+  "geeks.kr",
+  "geeks.co.kr",
+  "mastodon.social",
+  "velog.io",
+  "hashnode.com",
   "discord.com",
   "discord.gg",
 ]);
@@ -23,9 +43,42 @@ const SOCIAL_DOMAINS = new Set([
 const DATA_DOMAINS = new Set([
   "youtube.com",
   "youtu.be",
+  "m.youtube.com",
+  "vimeo.com",
+  "dailymotion.com",
+  "twitch.tv",
+  "loom.com",
+  "docs.google.com",
+  "drive.google.com",
+  "colab.research.google.com",
+  "slideshare.net",
+  "speakerdeck.com",
+  "figshare.com",
+  "zenodo.org",
+  "kaggle.com",
+  "huggingface.co",
+  "osf.io",
+  "dropbox.com",
+  "onedrive.live.com",
+  "unsplash.com",
+  "images.unsplash.com",
+  "pexels.com",
+  "pixabay.com",
+  "imgur.com",
+  "flickr.com",
+  "giphy.com",
+  "tenor.com",
+  "media.githubusercontent.com",
+  "raw.githubusercontent.com",
   "arxiv.org",
   "openreview.net",
   "aclanthology.org",
+  "dblp.org",
+  "ieeexplore.ieee.org",
+  "springer.com",
+  "link.springer.com",
+  "sciencedirect.com",
+  "dl.acm.org",
   "semanticscholar.org",
   "researchgate.net",
   "paperswithcode.com",
@@ -38,11 +91,24 @@ const DATA_DOMAINS = new Set([
 ]);
 
 const ACADEMIC_HINT_RE =
-  /(arxiv|openreview|aclanthology|semanticscholar|researchgate|paperswithcode|preprint|doi\.org)/i;
-const YOUTUBE_HINT_RE = /(youtube\.com|youtu\.be)/i;
+  /(arxiv|openreview|aclanthology|semanticscholar|researchgate|paperswithcode|preprint|doi\.org|whitepaper|technical\s*report|benchmark|leaderboard|supplementary)/i;
+const YOUTUBE_HINT_RE = /(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|twitch\.tv|loom\.com)/i;
+const GOOGLE_DOCS_HINT_RE =
+  /(docs\.google\.com|drive\.google\.com|colab\.research\.google\.com|slideshare\.net|speakerdeck\.com|notion\.(so|site))/i;
+const IMAGE_OR_VIDEO_HINT_RE =
+  /\.(png|jpe?g|gif|webp|bmp|svg|tiff|avif|mp4|mov|avi|mkv|webm|flv|m3u8)(?:$|[?#])/i;
+const DATA_FILE_HINT_RE =
+  /\.(pdf|csv|tsv|json|jsonl|xml|yaml|yml|parquet|xls|xlsx|doc|docx|ppt|pptx|zip|tar|gz|7z)(?:$|[?#])/i;
+const FILETYPE_HINT_RE = /(filetype=pdf|format=pdf|download=1|output=1)/i;
 
 function normalizeHost(value: string): string {
-  return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/:\d+$/, "")
+    .replace(/\/+$/, "");
 }
 
 function hostFromUrl(url?: string | null): string {
@@ -74,11 +140,17 @@ export function classifySourceCategory(source: SourceLike): PrimaryType {
   const url = (source.url ?? "").toLowerCase();
   const title = (source.title ?? "").toLowerCase();
 
+  if (type === "social") return "social";
+  if (type === "data") return "data";
   if (type === "video" || type === "image") return "data";
   if (hasDomain(host, SOCIAL_DOMAINS)) return "social";
 
   if (hasDomain(host, DATA_DOMAINS)) return "data";
   if (YOUTUBE_HINT_RE.test(url)) return "data";
+  if (GOOGLE_DOCS_HINT_RE.test(url)) return "data";
+  if (IMAGE_OR_VIDEO_HINT_RE.test(url)) return "data";
+  if (DATA_FILE_HINT_RE.test(url)) return "data";
+  if (FILETYPE_HINT_RE.test(url)) return "data";
   if (ACADEMIC_HINT_RE.test(url) || ACADEMIC_HINT_RE.test(title)) return "data";
 
   return "news";
@@ -95,8 +167,7 @@ export function determinePrimaryType(sources: SourceLike[]): PrimaryType {
 
   for (let i = 0; i < sources.length; i++) {
     const category = classifySourceCategory(sources[i]);
-    const weight = i < 3 ? 3 : i < 8 ? 2 : 1;
-    scores[category] += weight;
+    scores[category] += 1;
   }
 
   const firstCategory = classifySourceCategory(sources[0]);

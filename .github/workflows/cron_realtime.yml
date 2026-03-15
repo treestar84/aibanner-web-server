@@ -1,21 +1,20 @@
-name: Snapshot Pipeline
+name: Snapshot Pipeline (Realtime)
 
 on:
   schedule:
-    - cron: "17 0 * * *"   # KST 09:17 (UTC 00:17)
-    - cron: "17 9 * * *"   # KST 18:17 (UTC 09:17)
+    - cron: "0 */2 * * *" # UTC every 2 hours
   workflow_dispatch:
 
 concurrency:
-  group: snapshot-pipeline
+  group: snapshot-pipeline-realtime
   cancel-in-progress: false
 
 jobs:
-  run-snapshot:
+  run-snapshot-realtime:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Trigger snapshot pipeline
+      - name: Trigger realtime snapshot pipeline
         env:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -27,13 +26,13 @@ jobs:
             exit 1
           fi
 
-          endpoint="${APP_URL%/}/api/cron/snapshot?mode=briefing&retention=1"
+          endpoint="${APP_URL%/}/api/cron/snapshot?mode=realtime&retention=0"
           body_file="$(mktemp)"
           success=0
           status="000"
 
           for attempt in 1 2 3; do
-            echo "[snapshot] attempt=${attempt} endpoint=${endpoint}"
+            echo "[snapshot-realtime] attempt=${attempt} endpoint=${endpoint}"
             status="$(curl -sS \
               -o "${body_file}" \
               -w "%{http_code}" \
@@ -46,7 +45,6 @@ jobs:
               break
             fi
 
-            # 4xx(429 제외)는 재시도해도 해결되지 않을 가능성이 높아 즉시 실패
             if [ "${status}" -ge 400 ] && [ "${status}" -lt 500 ] && [ "${status}" -ne 429 ]; then
               break
             fi
@@ -55,7 +53,7 @@ jobs:
           done
 
           {
-            echo "## Snapshot Trigger Result"
+            echo "## Realtime Snapshot Trigger Result"
             echo ""
             echo "- Endpoint: \`${endpoint}\`"
             echo "- HTTP Status: \`${status}\`"
@@ -69,7 +67,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
           if [ "${success}" -ne 1 ]; then
-            echo "[snapshot] failed with status=${status}"
+            echo "[snapshot-realtime] failed with status=${status}"
             cat "${body_file}"
             exit 1
           fi

@@ -1,33 +1,33 @@
 import OpenAI from "openai";
 import type { TavilySource } from "./tavily";
 
-const SYSTEM_PROMPT_KO = `You are an AI trend analyst.
-Given a keyword and its related news snippets, write a concise summary in Korean.
-
-Rules (STRICT):
-- Maximum 200 characters (Korean)
-- NO emojis, NO bullet points, NO markdown
-- Plain prose only
-- Focus on why this keyword is trending NOW
-- Be factual and specific`;
-
-const SYSTEM_PROMPT_EN = `You are an AI trend analyst.
-Given a keyword and its related news snippets, write a concise summary in English.
-
-Rules (STRICT):
-- Maximum 200 characters (English)
-- NO emojis, NO bullet points, NO markdown
-- Plain prose only
-- Focus on why this keyword is trending NOW
-- Be factual and specific`;
-
 function cleanSummary(raw: string): string {
   return raw
     .replace(/[\u{1F300}-\u{1F9FF}]/gu, "")
     .replace(/^[-•*]\s/gm, "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 220);
+    .slice(0, SUMMARY_MAX_CHARS);
+}
+
+function parseTranslatedLines(raw: string): string[] {
+  const normalized = raw.trim();
+  if (!normalized) return [];
+
+  const splitLines = normalized
+    .split("\n")
+    .map((line) => line.replace(/^\s*\d+[\.\)\-:]\s+(?=\D)/, "").trim())
+    .filter((line) => line.length > 0);
+
+  if (splitLines.length > 1) return splitLines;
+
+  // 모델이 한 줄에 "1. ... 2. ..." 형태로 반환하는 경우 대응
+  const numbered = [...normalized.matchAll(/\d+[\.\)]\s+([^]+?)(?=\s+\d+[\.\)]\s+|$)/g)]
+    .map((match) => match[1].trim())
+    .filter((line) => line.length > 0);
+
+  if (numbered.length > 0) return numbered;
+  return splitLines;
 }
 
 function parseBooleanEnv(
@@ -65,6 +65,24 @@ const SUMMARY_CONTEXT_LIMIT = parsePositiveIntEnv(
   1,
   10
 );
+const SUMMARY_MAX_CHARS = parsePositiveIntEnv(
+  process.env.SUMMARY_MAX_CHARS,
+  440,
+  180,
+  1200
+);
+
+function buildSystemPrompt(langLabel: "Korean" | "English"): string {
+  return `You are an AI trend analyst.
+Given a keyword and its related news snippets, write a concise summary in ${langLabel}.
+
+Rules (STRICT):
+- Maximum ${SUMMARY_MAX_CHARS} characters (${langLabel})
+- NO emojis, NO bullet points, NO markdown
+- Plain prose only
+- Focus on why this keyword is trending NOW
+- Be factual and specific`;
+}
 
 export async function generateSummaries(
   keyword: string,
@@ -84,10 +102,10 @@ export async function generateSummaries(
     const koPromise = client.chat.completions.create({
       model,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT_KO },
+        { role: "system", content: buildSystemPrompt("Korean") },
         { role: "user", content: userMessage },
       ],
-      max_tokens: 300,
+      max_tokens: 600,
       temperature: 0.3,
     });
 
@@ -95,10 +113,10 @@ export async function generateSummaries(
       ? client.chat.completions.create({
           model,
           messages: [
-            { role: "system", content: SYSTEM_PROMPT_EN },
+            { role: "system", content: buildSystemPrompt("English") },
             { role: "user", content: userMessage },
           ],
-          max_tokens: 300,
+          max_tokens: 600,
           temperature: 0.3,
         })
       : Promise.resolve(null);
@@ -153,14 +171,12 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
     });
 
     const raw = response.choices[0]?.message?.content ?? "";
-    const lines = raw
-      .split("\n")
-      .map((l) => l.replace(/^\d+\.\s*/, "").trim())
-      .filter((l) => l.length > 0);
+    const lines = parseTranslatedLines(raw);
 
-    // 길이가 맞지 않으면 원본 반환
-    if (lines.length !== titles.length) return titles;
-    return lines;
+    if (lines.length === 0) return titles;
+
+    // 개수가 어긋나도 가능한 범위는 번역값 사용, 나머지는 원문 유지
+    return titles.map((title, index) => lines[index] ?? title);
   } catch (err) {
     console.warn(`[summarize] batchTranslateTitles failed:`, err);
     return titles;

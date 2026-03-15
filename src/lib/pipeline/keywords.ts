@@ -1,6 +1,7 @@
 import type { RssItem } from "./rss";
 import OpenAI from "openai";
 import { isExactlyExcludedKeyword } from "./keyword_exclusions";
+import type { PipelineMode } from "./mode";
 
 // ─── Generic term filter (hard filter — safety net after LLM extraction) ─────
 
@@ -172,6 +173,7 @@ export interface KeywordCandidate {
   text: string;
   count: number;
   domains: Set<string>;
+  matchedItems: Set<number>;
   latestAt: Date;
   tier: string;
 }
@@ -183,25 +185,151 @@ export interface NormalizedKeyword {
   candidates: KeywordCandidate;
 }
 
+const HANGUL_RE_CHAR = /[\uAC00-\uD7AF\u3130-\u318F\u1100-\u11FF]/;
+const ASCII_RE_CHAR = /[a-z]/i;
+const MINOR_VARIANT_WORDS = new Set([
+  "small", "mini", "micro", "lite", "base", "core",
+  "pro", "plus", "max", "large", "turbo",
+  "스몰", "미니", "라이트", "베이스", "프로", "플러스", "맥스", "라지",
+]);
+const CONTEXT_HEAD_HINTS = new Set([
+  "mode", "modes", "feature", "features", "assistant", "assistants",
+  "workflow", "workflows", "plugin", "plugins", "extension", "extensions",
+  "integration", "integrations", "capability", "capabilities",
+  "voice", "audio", "chat", "agent", "agents",
+  "모드", "기능", "업데이트", "연동", "통합", "보이스", "음성", "도우미",
+]);
+const CONTEXT_HEAD_SUFFIX_RE = /(mode|feature|assistant|workflow|plugin|extension|integration|capability|voice|audio|chat|agent|모드|기능|업데이트|연동|통합|보이스|음성)$/i;
+
+function normalizeKeywordSurface(text: string): string {
+  return text
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    // qwen3.5 -> qwen 3.5 (버전 표기 토큰 분리)
+    .replace(/([a-z])(\d+(?:\.\d+)?)(?=\b)/gi, "$1 $2")
+    .replace(/[_\-·/]+/g, " ")
+    .replace(/[“”"'`~!@#$%^&*()+=[\]{}|\\:;<>?,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactKeywordSurface(text: string): string {
+  return normalizeKeywordSurface(text).replace(/[.\s]+/g, "");
+}
+
+function trimMinorVariantSuffix(text: string): string {
+  const words = normalizeKeywordSurface(text).split(/\s+/).filter(Boolean);
+  while (words.length > 1 && MINOR_VARIANT_WORDS.has(words[words.length - 1])) {
+    words.pop();
+  }
+  return words.join(" ");
+}
+
+function extractVersionTokens(text: string): Set<string> {
+  const matches = normalizeKeywordSurface(text).match(/\d+(?:\.\d+){0,2}/g) ?? [];
+  return new Set(matches);
+}
+
+function extractAsciiCoreTokens(text: string): Set<string> {
+  const tokens = normalizeKeywordSurface(text)
+    .split(/\s+/)
+    .map((token) => token.replace(/[^a-z0-9]/g, ""))
+    .filter((token) => /[a-z]/.test(token) && token.length >= 3 && !MINOR_VARIANT_WORDS.has(token));
+  return new Set(tokens);
+}
+
+function hasHangulChars(text: string): boolean {
+  return HANGUL_RE_CHAR.test(text);
+}
+
+function hasAsciiChars(text: string): boolean {
+  return ASCII_RE_CHAR.test(text);
+}
+
+function tokenizeKeyword(text: string): string[] {
+  return normalizeKeywordSurface(text).split(/\s+/).filter(Boolean);
+}
+
+function isContextHeadToken(token: string): boolean {
+  if (!token) return false;
+  return CONTEXT_HEAD_HINTS.has(token) || CONTEXT_HEAD_SUFFIX_RE.test(token);
+}
+
+function extractAnchorLikeTokensFromKeyword(text: string): string[] {
+  return tokenizeKeyword(text).filter((token) => {
+    if (token.length < 2) return false;
+    if (GENERIC_WORDS.has(token)) return false;
+    if (FUNCTION_WORDS.has(token)) return false;
+    if (MATCH_STOPWORDS.has(token)) return false;
+    if (isContextHeadToken(token)) return false;
+    return /[a-z0-9\uAC00-\uD7AF]/i.test(token);
+  });
+}
+
+function isContextDependentKeyword(text: string): boolean {
+  const tokens = tokenizeKeyword(text);
+  if (tokens.length === 0) return false;
+  const anchorTokens = extractAnchorLikeTokensFromKeyword(text);
+  if (anchorTokens.length > 0) return false;
+
+  if (tokens.every((token) => isContextHeadToken(token))) return true;
+  if (tokens.length === 2 && GENERIC_WORDS.has(tokens[0]) && isContextHeadToken(tokens[1])) return true;
+  return false;
+}
+
+function getSetIntersectionSize<T>(a: Set<T>, b: Set<T>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  let intersection = 0;
+  for (const value of small) {
+    if (large.has(value)) intersection++;
+  }
+  return intersection;
+}
+
+function buildContextEnrichedKeyword(anchorKeyword: string, headKeyword: string): string {
+  const anchor = anchorKeyword.trim();
+  const head = headKeyword.trim();
+  if (!anchor) return head;
+  if (!head) return anchor;
+
+  const anchorNormalized = normalizeKeywordSurface(anchor);
+  const headNormalized = normalizeKeywordSurface(head);
+  if (anchorNormalized.includes(headNormalized)) return anchor;
+  if (headNormalized.includes(anchorNormalized)) return head;
+  return `${anchor} ${head}`.replace(/\s+/g, " ").trim();
+}
+
+function cloneCandidate(candidate: KeywordCandidate): KeywordCandidate {
+  return {
+    ...candidate,
+    domains: new Set(candidate.domains),
+    matchedItems: new Set(candidate.matchedItems),
+  };
+}
+
 // ─── Slugify ─────────────────────────────────────────────────────────────────
 
 function slugify(text: string): string {
-  const hasKorean = /[\uAC00-\uD7AF\u3130-\u318F\u1100-\u11FF]/.test(text);
+  const normalized = normalizeKeywordSurface(text);
+  const hasKorean = hasHangulChars(normalized);
 
   if (!hasKorean) {
-    const ascii = text
-      .toLowerCase()
-      .replace(/[_\-.]+/g, " ")
-      .replace(/[^\w\s]/g, "")
+    const ascii = normalized
+      .replace(/[^a-z0-9.\s]/g, " ")
+      .replace(/\./g, "_")
       .replace(/\s+/g, "_")
-      .trim();
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
     if (ascii.replace(/_/g, "").length >= 2) return ascii;
   }
 
   // 한국어 포함 텍스트 또는 너무 짧은 ASCII → 충돌 방지 해시
   let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = ((hash << 5) - hash + text.charCodeAt(i)) >>> 0;
+  const source = normalized || text;
+  for (let i = 0; i < source.length; i++) {
+    hash = ((hash << 5) - hash + source.charCodeAt(i)) >>> 0;
   }
   return `kw_${hash.toString(36)}`;
 }
@@ -471,18 +599,20 @@ function matchKeywordsToItems(
       text: kw.keyword,
       count: 0,
       domains: new Set(),
+      matchedItems: new Set<number>(),
       latestAt: new Date(0),
       tier: "P2_RAW",
     };
 
-    for (const item of items) {
+    for (let idx = 0; idx < items.length; idx++) {
+      const item = items[idx];
       const haystack = `${item.title} ${item.summary}`.toLowerCase();
       const matched = searchTerms.some((term) =>
         termMatchesHaystack(term, haystack)
       );
 
       if (matched) {
-        candidate.count++;
+        candidate.matchedItems.add(idx);
         candidate.domains.add(item.sourceDomain);
         if (item.publishedAt > candidate.latestAt) {
           candidate.latestAt = item.publishedAt;
@@ -494,6 +624,7 @@ function matchKeywordsToItems(
       }
     }
 
+    candidate.count = candidate.matchedItems.size;
     result.set(kw.keyword.toLowerCase(), candidate);
   }
 
@@ -505,15 +636,17 @@ function matchKeywordsToItems(
 const TRAILING_ACTION_WORDS = new Set([
   "도입", "채택", "활용", "공개", "출시", "발표", "확대", "추진",
   "적용", "업데이트", "통합", "지원", "강화", "개선",
+  "launch", "launched", "release", "released", "update", "updated",
+  "adoption", "adopted", "integration", "integrated",
 ]);
 
 function deduplicateKeywords(keywords: LLMKeyword[]): LLMKeyword[] {
   function getCore(kw: string): string {
-    const words = kw.split(/\s+/);
+    const words = normalizeKeywordSurface(kw).split(/\s+/).filter(Boolean);
     if (words.length >= 2 && TRAILING_ACTION_WORDS.has(words[words.length - 1])) {
-      return words.slice(0, -1).join(" ").toLowerCase();
+      return compactKeywordSurface(words.slice(0, -1).join(" "));
     }
-    return kw.toLowerCase();
+    return compactKeywordSurface(trimMinorVariantSuffix(words.join(" ")));
   }
   const coreMap = new Map<string, LLMKeyword>();
   for (const kw of keywords) {
@@ -528,11 +661,482 @@ function deduplicateKeywords(keywords: LLMKeyword[]): LLMKeyword[] {
   return [...coreMap.values()];
 }
 
+interface KeywordSignals {
+  normalizedForms: Set<string>;
+  compactForms: Set<string>;
+  versionTokens: Set<string>;
+  asciiCoreTokens: Set<string>;
+  hasHangul: boolean;
+  hasAscii: boolean;
+}
+
+function intersectsSet<T>(a: Set<T>, b: Set<T>): boolean {
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  for (const value of small) {
+    if (large.has(value)) return true;
+  }
+  return false;
+}
+
+function jaccardOverlap(a: Set<number>, b: Set<number>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  const intersection = getSetIntersectionSize(a, b);
+  const union = a.size + b.size - intersection;
+  if (union === 0) return 0;
+  return intersection / union;
+}
+
+function buildKeywordSignals(keyword: LLMKeyword): KeywordSignals {
+  const normalizedForms = new Set<string>();
+  const compactForms = new Set<string>();
+  const versionTokens = new Set<string>();
+  const asciiCoreTokens = new Set<string>();
+  let hasHangul = false;
+  let hasAscii = false;
+
+  for (const value of [keyword.keyword, ...keyword.aliases]) {
+    const normalized = normalizeKeywordSurface(value);
+    if (!normalized) continue;
+
+    const trimmedVariant = trimMinorVariantSuffix(normalized);
+    for (const form of [normalized, trimmedVariant]) {
+      if (!form) continue;
+      normalizedForms.add(form);
+      const compact = compactKeywordSurface(form);
+      if (compact) compactForms.add(compact);
+      for (const version of extractVersionTokens(form)) {
+        versionTokens.add(version);
+      }
+      for (const token of extractAsciiCoreTokens(form)) {
+        asciiCoreTokens.add(token);
+      }
+    }
+
+    if (hasHangulChars(value)) hasHangul = true;
+    if (hasAsciiChars(value)) hasAscii = true;
+  }
+
+  return {
+    normalizedForms,
+    compactForms,
+    versionTokens,
+    asciiCoreTokens,
+    hasHangul,
+    hasAscii,
+  };
+}
+
+function chooseCanonicalKeyword(
+  entries: Array<{ keyword: LLMKeyword; candidate: KeywordCandidate; signals: KeywordSignals }>
+): string {
+  const sorted = [...entries].sort((a, b) => {
+    const aNormalized = normalizeKeywordSurface(a.keyword.keyword);
+    const bNormalized = normalizeKeywordSurface(b.keyword.keyword);
+    const aAnchorTokens = extractAnchorLikeTokensFromKeyword(a.keyword.keyword).length;
+    const bAnchorTokens = extractAnchorLikeTokensFromKeyword(b.keyword.keyword).length;
+    const aContextDependent = isContextDependentKeyword(a.keyword.keyword);
+    const bContextDependent = isContextDependentKeyword(b.keyword.keyword);
+    const aLastWord = (() => {
+      const words = aNormalized.split(/\s+/);
+      return words[words.length - 1] ?? "";
+    })();
+    const bLastWord = (() => {
+      const words = bNormalized.split(/\s+/);
+      return words[words.length - 1] ?? "";
+    })();
+
+    const scoreA =
+      (a.signals.hasAscii ? 40 : 0) +
+      (!a.signals.hasHangul ? 10 : 0) +
+      (/[a-z]\s+\d+(?:\.\d+)?/i.test(aNormalized) ? 8 : 0) +
+      Math.min(aAnchorTokens, 4) * 5 +
+      Math.min(a.candidate.matchedItems.size, 20) +
+      (a.candidate.tier === "P0_CURATED" ? 4 : 0) -
+      (aContextDependent ? 14 : 0) -
+      (MINOR_VARIANT_WORDS.has(aLastWord) ? 6 : 0);
+    const scoreB =
+      (b.signals.hasAscii ? 40 : 0) +
+      (!b.signals.hasHangul ? 10 : 0) +
+      (/[a-z]\s+\d+(?:\.\d+)?/i.test(bNormalized) ? 8 : 0) +
+      Math.min(bAnchorTokens, 4) * 5 +
+      Math.min(b.candidate.matchedItems.size, 20) +
+      (b.candidate.tier === "P0_CURATED" ? 4 : 0) -
+      (bContextDependent ? 14 : 0) -
+      (MINOR_VARIANT_WORDS.has(bLastWord) ? 6 : 0);
+
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    if (aAnchorTokens !== bAnchorTokens) return bAnchorTokens - aAnchorTokens;
+    if (aNormalized.length !== bNormalized.length) return aNormalized.length - bNormalized.length;
+    return a.keyword.keyword.localeCompare(b.keyword.keyword);
+  });
+
+  return sorted[0]?.keyword.keyword ?? entries[0]?.keyword.keyword ?? "";
+}
+
+function mergeKeywordCandidates(
+  canonicalText: string,
+  entries: Array<{ candidate: KeywordCandidate }>
+): KeywordCandidate {
+  const domains = new Set<string>();
+  const matchedItems = new Set<number>();
+  let latestAt = new Date(0);
+  let tier = "P2_RAW";
+
+  for (const entry of entries) {
+    for (const domain of entry.candidate.domains) domains.add(domain);
+    for (const idx of entry.candidate.matchedItems) matchedItems.add(idx);
+    if (entry.candidate.latestAt > latestAt) latestAt = entry.candidate.latestAt;
+    if ((TIER_ORDER[entry.candidate.tier] ?? 9) < (TIER_ORDER[tier] ?? 9)) {
+      tier = entry.candidate.tier;
+    }
+  }
+
+  return {
+    text: canonicalText,
+    count: matchedItems.size,
+    domains,
+    matchedItems,
+    latestAt,
+    tier,
+  };
+}
+
+function shouldMergeKeywordEntries(
+  left: { signals: KeywordSignals; candidate: KeywordCandidate },
+  right: { signals: KeywordSignals; candidate: KeywordCandidate }
+): boolean {
+  if (intersectsSet(left.signals.compactForms, right.signals.compactForms)) return true;
+  if (intersectsSet(left.signals.normalizedForms, right.signals.normalizedForms)) return true;
+
+  const overlap = jaccardOverlap(left.candidate.matchedItems, right.candidate.matchedItems);
+  const shareVersion = intersectsSet(left.signals.versionTokens, right.signals.versionTokens);
+  const shareAsciiCore = intersectsSet(left.signals.asciiCoreTokens, right.signals.asciiCoreTokens);
+  const crossScript =
+    (left.signals.hasHangul && right.signals.hasAscii) ||
+    (right.signals.hasHangul && left.signals.hasAscii);
+
+  if (overlap >= 0.92 && (shareVersion || shareAsciiCore || crossScript)) return true;
+  if (overlap >= 0.8 && shareVersion && (shareAsciiCore || crossScript)) return true;
+  if (overlap >= 0.75 && shareAsciiCore && (shareVersion || crossScript)) return true;
+  return false;
+}
+
+function normalizeAlias(alias: string): string {
+  return alias.normalize("NFKC").trim();
+}
+
+function consolidateKeywordVariants(
+  keywords: LLMKeyword[],
+  candidateMap: Map<string, KeywordCandidate>
+): { keywords: LLMKeyword[]; candidateMap: Map<string, KeywordCandidate> } {
+  if (keywords.length <= 1) return { keywords, candidateMap };
+
+  const entries = keywords.map((keyword) => ({
+    keyword,
+    candidate: candidateMap.get(keyword.keyword.toLowerCase()) ?? {
+      text: keyword.keyword,
+      count: 0,
+      domains: new Set<string>(),
+      matchedItems: new Set<number>(),
+      latestAt: new Date(0),
+      tier: "P2_RAW",
+    },
+    signals: buildKeywordSignals(keyword),
+  }));
+
+  const parent = entries.map((_, idx) => idx);
+
+  const find = (index: number): number => {
+    if (parent[index] === index) return index;
+    parent[index] = find(parent[index]);
+    return parent[index];
+  };
+
+  const union = (a: number, b: number): void => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parent[rootB] = rootA;
+  };
+
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      if (shouldMergeKeywordEntries(entries[i], entries[j])) {
+        union(i, j);
+      }
+    }
+  }
+
+  const grouped = new Map<number, typeof entries>();
+  for (let i = 0; i < entries.length; i++) {
+    const root = find(i);
+    const current = grouped.get(root);
+    if (current) {
+      current.push(entries[i]);
+    } else {
+      grouped.set(root, [entries[i]]);
+    }
+  }
+
+  const mergedKeywords: LLMKeyword[] = [];
+  const mergedCandidates = new Map<string, KeywordCandidate>();
+
+  for (const group of grouped.values()) {
+    const canonicalKeyword = chooseCanonicalKeyword(group);
+    const mergedCandidate = mergeKeywordCandidates(canonicalKeyword, group);
+
+    const aliasByKey = new Map<string, string>();
+    const canonicalKey = normalizeKeywordSurface(canonicalKeyword);
+    for (const entry of group) {
+      for (const alias of [entry.keyword.keyword, ...entry.keyword.aliases]) {
+        const cleaned = normalizeAlias(alias);
+        if (!cleaned) continue;
+        const key = normalizeKeywordSurface(cleaned);
+        if (!key || key === canonicalKey) continue;
+        if (!aliasByKey.has(key)) aliasByKey.set(key, cleaned);
+      }
+    }
+
+    const keywordItem: LLMKeyword = {
+      keyword: canonicalKeyword,
+      aliases: [...aliasByKey.values()],
+    };
+
+    const existing = mergedCandidates.get(canonicalKeyword.toLowerCase());
+    if (existing) {
+      for (const domain of mergedCandidate.domains) existing.domains.add(domain);
+      for (const idx of mergedCandidate.matchedItems) existing.matchedItems.add(idx);
+      existing.count = existing.matchedItems.size;
+      if (mergedCandidate.latestAt > existing.latestAt) existing.latestAt = mergedCandidate.latestAt;
+      if ((TIER_ORDER[mergedCandidate.tier] ?? 9) < (TIER_ORDER[existing.tier] ?? 9)) {
+        existing.tier = mergedCandidate.tier;
+      }
+    } else {
+      mergedKeywords.push(keywordItem);
+      mergedCandidates.set(canonicalKeyword.toLowerCase(), mergedCandidate);
+    }
+  }
+
+  return {
+    keywords: mergedKeywords,
+    candidateMap: mergedCandidates,
+  };
+}
+
+function mergeCandidates(candidates: KeywordCandidate[], text: string): KeywordCandidate {
+  const domains = new Set<string>();
+  const matchedItems = new Set<number>();
+  let latestAt = new Date(0);
+  let tier = "P2_RAW";
+
+  for (const candidate of candidates) {
+    for (const domain of candidate.domains) domains.add(domain);
+    for (const idx of candidate.matchedItems) matchedItems.add(idx);
+    if (candidate.latestAt > latestAt) latestAt = candidate.latestAt;
+    if ((TIER_ORDER[candidate.tier] ?? 9) < (TIER_ORDER[tier] ?? 9)) {
+      tier = candidate.tier;
+    }
+  }
+
+  return {
+    text,
+    count: matchedItems.size,
+    domains,
+    matchedItems,
+    latestAt,
+    tier,
+  };
+}
+
+function enrichContextDependentKeywords(
+  keywords: LLMKeyword[],
+  candidateMap: Map<string, KeywordCandidate>
+): { keywords: LLMKeyword[]; candidateMap: Map<string, KeywordCandidate> } {
+  type Entry = {
+    keyword: LLMKeyword;
+    candidate: KeywordCandidate;
+    isContextDependent: boolean;
+    anchorTokenCount: number;
+  };
+
+  const entries: Entry[] = keywords.map((keyword) => {
+    const candidate = candidateMap.get(keyword.keyword.toLowerCase()) ?? {
+      text: keyword.keyword,
+      count: 0,
+      domains: new Set<string>(),
+      matchedItems: new Set<number>(),
+      latestAt: new Date(0),
+      tier: "P2_RAW",
+    };
+    return {
+      keyword,
+      candidate: cloneCandidate(candidate),
+      isContextDependent: isContextDependentKeyword(keyword.keyword),
+      anchorTokenCount: extractAnchorLikeTokensFromKeyword(keyword.keyword).length,
+    };
+  });
+
+  const nonContextEntries = entries.filter((entry) => !entry.isContextDependent);
+  const outputKeywords = new Map<string, LLMKeyword>();
+  const outputCandidates = new Map<string, KeywordCandidate>();
+
+  const upsertOutput = (keyword: LLMKeyword, candidate: KeywordCandidate): void => {
+    const key = keyword.keyword.toLowerCase();
+    const existingKeyword = outputKeywords.get(key);
+    const existingCandidate = outputCandidates.get(key);
+
+    if (!existingKeyword || !existingCandidate) {
+      outputKeywords.set(key, { keyword: keyword.keyword, aliases: [...new Set(keyword.aliases)] });
+      outputCandidates.set(key, cloneCandidate(candidate));
+      return;
+    }
+
+    existingKeyword.aliases = [...new Set([...existingKeyword.aliases, ...keyword.aliases])];
+    outputCandidates.set(
+      key,
+      mergeCandidates([existingCandidate, candidate], existingKeyword.keyword)
+    );
+  };
+
+  for (const entry of nonContextEntries) {
+    upsertOutput(entry.keyword, entry.candidate);
+  }
+
+  for (const entry of entries) {
+    if (!entry.isContextDependent) continue;
+
+    let bestCompanion: Entry | null = null;
+    let bestScore = -Infinity;
+
+    for (const companion of nonContextEntries) {
+      if (companion.keyword.keyword === entry.keyword.keyword) continue;
+      if (companion.anchorTokenCount === 0) continue;
+
+      const intersection = getSetIntersectionSize(
+        entry.candidate.matchedItems,
+        companion.candidate.matchedItems
+      );
+      const minIntersection = Math.max(1, Math.min(2, entry.candidate.count));
+      if (intersection < minIntersection) continue;
+
+      const overlap = jaccardOverlap(
+        entry.candidate.matchedItems,
+        companion.candidate.matchedItems
+      );
+      const overlapThreshold = entry.candidate.count <= 2 ? 0.35 : 0.45;
+      if (overlap < overlapThreshold) continue;
+
+      const score =
+        overlap * 100 +
+        intersection * 8 +
+        Math.min(companion.candidate.domains.size, 8) * 2 +
+        Math.min(companion.anchorTokenCount, 5) * 3 +
+        (companion.candidate.tier === "P0_CURATED" ? 4 : 0);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestCompanion = companion;
+      }
+    }
+
+    if (!bestCompanion) {
+      const strongStandalone =
+        entry.candidate.count >= 4 && entry.candidate.domains.size >= 3;
+      if (strongStandalone) {
+        upsertOutput(entry.keyword, entry.candidate);
+        console.log(`[keywords] KEEP(context_head_high_signal): "${entry.keyword.keyword}"`);
+      } else {
+        console.log(`[keywords] DROP(context_head_no_anchor): "${entry.keyword.keyword}"`);
+      }
+      continue;
+    }
+
+    const enrichedText = buildContextEnrichedKeyword(
+      bestCompanion.keyword.keyword,
+      entry.keyword.keyword
+    );
+    const companionNormalized = normalizeKeywordSurface(bestCompanion.keyword.keyword);
+    const headNormalized = normalizeKeywordSurface(entry.keyword.keyword);
+
+    if (companionNormalized.includes(headNormalized)) {
+      upsertOutput(
+        {
+          keyword: bestCompanion.keyword.keyword,
+          aliases: [...bestCompanion.keyword.aliases, entry.keyword.keyword, ...entry.keyword.aliases],
+        },
+        mergeCandidates([bestCompanion.candidate, entry.candidate], bestCompanion.keyword.keyword)
+      );
+      console.log(
+        `[keywords] MERGE(context_head_into_companion): "${entry.keyword.keyword}" -> "${bestCompanion.keyword.keyword}"`
+      );
+      continue;
+    }
+
+    const enrichedKeyword: LLMKeyword = {
+      keyword: enrichedText,
+      aliases: [
+        ...bestCompanion.keyword.aliases,
+        ...entry.keyword.aliases,
+        entry.keyword.keyword,
+      ],
+    };
+    const enrichedCandidate = mergeCandidates(
+      [bestCompanion.candidate, entry.candidate],
+      enrichedText
+    );
+    upsertOutput(enrichedKeyword, enrichedCandidate);
+    console.log(
+      `[keywords] ENRICH(context_head): "${entry.keyword.keyword}" + "${bestCompanion.keyword.keyword}" -> "${enrichedText}"`
+    );
+  }
+
+  return {
+    keywords: [...outputKeywords.values()],
+    candidateMap: outputCandidates,
+  };
+}
+
+function mergeNormalizedKeywordsById(items: NormalizedKeyword[]): NormalizedKeyword[] {
+  const byId = new Map<string, NormalizedKeyword>();
+  for (const item of items) {
+    const existing = byId.get(item.keywordId);
+    if (!existing) {
+      byId.set(item.keywordId, {
+        ...item,
+        aliases: [...item.aliases],
+        candidates: {
+          ...item.candidates,
+          domains: new Set(item.candidates.domains),
+          matchedItems: new Set(item.candidates.matchedItems),
+        },
+      });
+      continue;
+    }
+
+    const aliasSet = new Set<string>([...existing.aliases, ...item.aliases]);
+    existing.aliases = [...aliasSet];
+
+    for (const domain of item.candidates.domains) existing.candidates.domains.add(domain);
+    for (const idx of item.candidates.matchedItems) existing.candidates.matchedItems.add(idx);
+    existing.candidates.count = existing.candidates.matchedItems.size;
+    if (item.candidates.latestAt > existing.candidates.latestAt) {
+      existing.candidates.latestAt = item.candidates.latestAt;
+    }
+    if ((TIER_ORDER[item.candidates.tier] ?? 9) < (TIER_ORDER[existing.candidates.tier] ?? 9)) {
+      existing.candidates.tier = item.candidates.tier;
+    }
+  }
+
+  return [...byId.values()];
+}
+
 // ─── Main: normalizeKeywords ────────────────────────────────────────────────
 
 export async function normalizeKeywords(
-  items: RssItem[]
+  items: RssItem[],
+  options: { mode?: PipelineMode } = {}
 ): Promise<NormalizedKeyword[]> {
+  const mode = options.mode ?? "briefing";
+  const isRealtimeMode = mode === "realtime";
   // 1. 제목 배치 준비
   const batches = prepareTitleBatches(items);
   console.log(
@@ -544,29 +1148,44 @@ export async function normalizeKeywords(
   const dedupedLlmKeywords = deduplicateKeywords(rawLlmKeywords);
   console.log(`[keywords] After dedup: ${rawLlmKeywords.length} → ${dedupedLlmKeywords.length} keywords`);
 
-  const llmKeywords = dedupedLlmKeywords.filter((kw) => {
+  const preConsolidationCandidates = matchKeywordsToItems(dedupedLlmKeywords, items);
+  const consolidated = consolidateKeywordVariants(dedupedLlmKeywords, preConsolidationCandidates);
+  console.log(
+    `[keywords] After consolidate: ${dedupedLlmKeywords.length} → ${consolidated.keywords.length} keywords`
+  );
+
+  const llmKeywords = consolidated.keywords.filter((kw) => {
     if (!isExactlyExcludedKeyword(kw.keyword)) return true;
     console.log(`[keywords] DROP(exact_exclusion): "${kw.keyword}"`);
     return false;
   });
-  console.log(`[keywords] After exact_exclusion: ${dedupedLlmKeywords.length} → ${llmKeywords.length} keywords`);
+  console.log(`[keywords] After exact_exclusion: ${consolidated.keywords.length} → ${llmKeywords.length} keywords`);
+
+  const enriched = enrichContextDependentKeywords(llmKeywords, consolidated.candidateMap);
+  console.log(
+    `[keywords] After context_enrich: ${llmKeywords.length} → ${enriched.keywords.length} keywords`
+  );
 
   // 3. 아이템 매칭 → scoring 메타데이터 복원
-  const candidateMap = matchKeywordsToItems(llmKeywords, items);
+  const candidateMap = enriched.candidateMap;
 
   // 4. NormalizedKeyword 배열 구성 + GENERIC_TERMS 필터
   const result: NormalizedKeyword[] = [];
-  console.log(`[keywords] --- Filtering pipeline (${llmKeywords.length} candidates) ---`);
+  console.log(`[keywords] --- Filtering pipeline (${enriched.keywords.length} candidates) ---`);
 
-  for (const kw of llmKeywords) {
+  for (const kw of enriched.keywords) {
     const candidate = candidateMap.get(kw.keyword.toLowerCase());
 
     if (!candidate || candidate.count === 0) {
       console.log(`[keywords] DROP(no_match)       : "${kw.keyword}"`);
       continue;
     }
-    // P0_CURATED(공식 블로그) 제외, 단일 소스 키워드 드롭 (Gushwork 류 방지)
-    if (candidate.tier !== "P0_CURATED" && candidate.domains.size < 2) {
+    // briefing: 단일 소스 키워드 제거(품질 우선)
+    // realtime: 단일 소스 허용 폭을 넓혀 자동 키워드 소실을 방지
+    const shouldDropSingleDomain = isRealtimeMode
+      ? candidate.tier === "COMMUNITY" && candidate.count < 2
+      : candidate.tier !== "P0_CURATED" && candidate.domains.size < 2;
+    if (shouldDropSingleDomain) {
       console.log(`[keywords] DROP(single_domain)  : "${kw.keyword}" (domains=${candidate.domains.size})`);
       continue;
     }
@@ -616,8 +1235,13 @@ export async function normalizeKeywords(
     });
   }
 
+  const mergedById = mergeNormalizedKeywordsById(result);
+  if (mergedById.length !== result.length) {
+    console.log(`[keywords] Merge by keywordId: ${result.length} → ${mergedById.length}`);
+  }
+
   console.log(
-    `[keywords] Final: ${result.length} keywords after matching and filtering`
+    `[keywords] Final: ${mergedById.length} keywords after matching and filtering`
   );
-  return result;
+  return mergedById;
 }

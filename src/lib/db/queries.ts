@@ -1,9 +1,18 @@
 import { sql } from "./client";
+import {
+  buildExtendedManualKeywordWindow,
+  buildManualKeywordId,
+  buildManualKeywordWindow,
+  normalizeManualKeywordText,
+  sanitizeManualKeywordTtlHours,
+} from "@/lib/manual-keywords";
+import type { PipelineMode } from "@/lib/pipeline/mode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface Snapshot {
   snapshot_id: string;
+  pipeline_mode: PipelineMode;
   updated_at_utc: string;
   next_update_at_utc: string;
   created_at: string;
@@ -13,6 +22,8 @@ export interface Keyword {
   snapshot_id: string;
   keyword_id: string;
   keyword: string;
+  keyword_ko: string;
+  keyword_en: string;
   rank: number;
   delta_rank: number;
   is_new: boolean;
@@ -20,11 +31,14 @@ export interface Keyword {
   score_recency: number;
   score_frequency: number;
   score_authority: number;
+  score_velocity: number;
   score_internal: number;
   summary_short: string;
   summary_short_en: string;
   primary_type: "news" | "social" | "data" | "web" | "video" | "image";
   top_source_title: string | null;
+  top_source_title_ko: string | null;
+  top_source_title_en: string | null;
   top_source_url: string | null;
   top_source_domain: string | null;
   top_source_image_url: string | null;
@@ -47,36 +61,420 @@ export interface Source {
   created_at: string;
 }
 
+export interface HotKeyword extends Keyword {
+  snapshot_updated_at_utc: string;
+  view_count: number;
+  last_viewed_at: string | null;
+}
+
+export interface RetentionCounts {
+  aggregatedRows: number;
+  deletedDailyStats: number;
+  deletedSources: number;
+  deletedKeywords: number;
+  deletedSnapshots: number;
+  deletedKeywordAliases: number;
+  deletedKeywordViewCounts: number;
+}
+
+export interface SourceIngestionState {
+  source_key: string;
+  last_success_at_utc: string | null;
+  last_published_at_utc: string | null;
+  last_item_count: number;
+  last_window_hours: number;
+  updated_at: string;
+}
+
+export interface ManualKeyword {
+  id: number;
+  keyword: string;
+  mode: PipelineMode;
+  ttl_hours: number;
+  enabled: boolean;
+  starts_at: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+  remaining_seconds: number;
+  is_active: boolean;
+}
+
+interface ManualKeywordRow {
+  id: number;
+  keyword: string;
+  mode: PipelineMode;
+  ttl_hours: number;
+  enabled: boolean;
+  starts_at: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+  remaining_seconds: number | string;
+  is_active: boolean;
+}
+
+function toManualKeyword(row: ManualKeywordRow): ManualKeyword {
+  return {
+    ...row,
+    remaining_seconds: Math.max(0, Number(row.remaining_seconds ?? 0)),
+  };
+}
+
+// ─── Manual keyword queries ───────────────────────────────────────────────────
+
+export async function listManualKeywords(mode?: PipelineMode): Promise<ManualKeyword[]> {
+  const rows = mode
+    ? ((await sql`
+      SELECT
+        mk.*,
+        GREATEST(0, EXTRACT(EPOCH FROM (mk.expires_at - NOW())))::int AS remaining_seconds,
+        (
+          mk.enabled = TRUE
+          AND mk.starts_at <= NOW()
+          AND mk.expires_at > NOW()
+        ) AS is_active
+      FROM manual_keywords mk
+      WHERE mk.mode = ${mode}
+      ORDER BY mk.enabled DESC, mk.expires_at DESC, mk.created_at DESC
+      LIMIT 300
+    `) as ManualKeywordRow[])
+    : ((await sql`
+      SELECT
+        mk.*,
+        GREATEST(0, EXTRACT(EPOCH FROM (mk.expires_at - NOW())))::int AS remaining_seconds,
+        (
+          mk.enabled = TRUE
+          AND mk.starts_at <= NOW()
+          AND mk.expires_at > NOW()
+        ) AS is_active
+      FROM manual_keywords mk
+      ORDER BY mk.enabled DESC, mk.expires_at DESC, mk.created_at DESC
+      LIMIT 300
+    `) as ManualKeywordRow[]);
+
+  return rows.map(toManualKeyword);
+}
+
+export async function getActiveManualKeywords(
+  mode: PipelineMode
+): Promise<ManualKeyword[]> {
+  const rows = (await sql`
+    SELECT
+      mk.*,
+      GREATEST(0, EXTRACT(EPOCH FROM (mk.expires_at - NOW())))::int AS remaining_seconds,
+      (
+        mk.enabled = TRUE
+        AND mk.starts_at <= NOW()
+        AND mk.expires_at > NOW()
+      ) AS is_active
+    FROM manual_keywords mk
+    WHERE mk.mode = ${mode}
+      AND mk.enabled = TRUE
+      AND mk.starts_at <= NOW()
+      AND mk.expires_at > NOW()
+    ORDER BY mk.created_at DESC, mk.id DESC
+  `) as ManualKeywordRow[];
+
+  return rows.map(toManualKeyword);
+}
+
+export async function getActiveManualKeywordIds(
+  mode: PipelineMode
+): Promise<Set<string>> {
+  const items = await getActiveManualKeywords(mode);
+  return new Set(items.map((item) => buildManualKeywordId(mode, item.keyword)));
+}
+
+export async function getManualKeywordById(id: number): Promise<ManualKeyword | null> {
+  const rows = (await sql`
+    SELECT
+      mk.*,
+      GREATEST(0, EXTRACT(EPOCH FROM (mk.expires_at - NOW())))::int AS remaining_seconds,
+      (
+        mk.enabled = TRUE
+        AND mk.starts_at <= NOW()
+        AND mk.expires_at > NOW()
+      ) AS is_active
+    FROM manual_keywords mk
+    WHERE mk.id = ${id}
+    LIMIT 1
+  `) as ManualKeywordRow[];
+
+  return rows[0] ? toManualKeyword(rows[0]) : null;
+}
+
+export async function upsertManualKeyword(input: {
+  keyword: string;
+  mode?: PipelineMode;
+  ttlHours?: number;
+}): Promise<ManualKeyword> {
+  const keyword = normalizeManualKeywordText(input.keyword);
+  if (!keyword) {
+    throw new Error("keyword is required");
+  }
+
+  const mode = input.mode ?? "realtime";
+  const ttlHours = sanitizeManualKeywordTtlHours(input.ttlHours ?? 6);
+  const window = buildManualKeywordWindow(ttlHours);
+
+  const existingRows = (await sql`
+    SELECT id
+    FROM manual_keywords
+    WHERE mode = ${mode}
+      AND lower(keyword) = lower(${keyword})
+    ORDER BY enabled DESC, expires_at DESC, id DESC
+    LIMIT 1
+  `) as { id: number }[];
+  const existingId = existingRows[0]?.id;
+
+  const rows = existingId
+    ? ((await sql`
+      UPDATE manual_keywords
+      SET keyword = ${keyword},
+          ttl_hours = ${ttlHours},
+          enabled = TRUE,
+          starts_at = ${window.startsAt},
+          expires_at = ${window.expiresAt},
+          updated_at = NOW()
+      WHERE id = ${existingId}
+      RETURNING
+        *,
+        GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int AS remaining_seconds,
+        (
+          enabled = TRUE
+          AND starts_at <= NOW()
+          AND expires_at > NOW()
+        ) AS is_active
+    `) as ManualKeywordRow[])
+    : ((await sql`
+      INSERT INTO manual_keywords (
+        keyword,
+        mode,
+        ttl_hours,
+        enabled,
+        starts_at,
+        expires_at,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${keyword},
+        ${mode},
+        ${ttlHours},
+        TRUE,
+        ${window.startsAt},
+        ${window.expiresAt},
+        NOW(),
+        NOW()
+      )
+      RETURNING
+        *,
+        GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int AS remaining_seconds,
+        (
+          enabled = TRUE
+          AND starts_at <= NOW()
+          AND expires_at > NOW()
+        ) AS is_active
+    `) as ManualKeywordRow[]);
+
+  return toManualKeyword(rows[0]);
+}
+
+export async function extendManualKeyword(
+  id: number,
+  ttlHours: number
+): Promise<ManualKeyword | null> {
+  const current = await getManualKeywordById(id);
+  if (!current) return null;
+
+  const sanitizedTtlHours = sanitizeManualKeywordTtlHours(ttlHours);
+  const window = buildExtendedManualKeywordWindow(
+    {
+      enabled: current.enabled,
+      startsAt: current.starts_at,
+      expiresAt: current.expires_at,
+    },
+    sanitizedTtlHours
+  );
+
+  const rows = (await sql`
+    UPDATE manual_keywords
+    SET ttl_hours = ${sanitizedTtlHours},
+        enabled = TRUE,
+        starts_at = ${window.startsAt},
+        expires_at = ${window.expiresAt},
+        updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING
+      *,
+      GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int AS remaining_seconds,
+      (
+        enabled = TRUE
+        AND starts_at <= NOW()
+        AND expires_at > NOW()
+      ) AS is_active
+  `) as ManualKeywordRow[];
+
+  return rows[0] ? toManualKeyword(rows[0]) : null;
+}
+
+export async function setManualKeywordEnabled(
+  id: number,
+  enabled: boolean
+): Promise<ManualKeyword | null> {
+  const current = await getManualKeywordById(id);
+  if (!current) return null;
+
+  const shouldRestartWindow =
+    enabled &&
+    new Date(current.expires_at).getTime() <= Date.now();
+  const window = shouldRestartWindow
+    ? buildManualKeywordWindow(current.ttl_hours)
+    : null;
+
+  const rows = (await sql`
+    UPDATE manual_keywords
+    SET enabled = ${enabled},
+        starts_at = CASE
+          WHEN ${enabled} AND ${window?.startsAt ?? null} IS NOT NULL THEN ${window?.startsAt ?? null}
+          ELSE starts_at
+        END,
+        expires_at = CASE
+          WHEN ${enabled} AND ${window?.expiresAt ?? null} IS NOT NULL THEN ${window?.expiresAt ?? null}
+          ELSE expires_at
+        END,
+        updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING
+      *,
+      GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int AS remaining_seconds,
+      (
+        enabled = TRUE
+        AND starts_at <= NOW()
+        AND expires_at > NOW()
+      ) AS is_active
+  `) as ManualKeywordRow[];
+
+  return rows[0] ? toManualKeyword(rows[0]) : null;
+}
+
+export async function deleteManualKeyword(id: number): Promise<boolean> {
+  const rows = (await sql`
+    DELETE FROM manual_keywords
+    WHERE id = ${id}
+    RETURNING id
+  `) as { id: number }[];
+
+  return rows.length > 0;
+}
+
 // ─── Snapshot queries ─────────────────────────────────────────────────────────
 
-export async function getLatestSnapshot(): Promise<Snapshot | null> {
-  const rows = (await sql`
-    SELECT * FROM snapshots
-    ORDER BY created_at DESC
-    LIMIT 1
-  `) as Snapshot[];
+export async function getLatestSnapshot(
+  mode?: PipelineMode
+): Promise<Snapshot | null> {
+  const rows = mode
+    ? ((await sql`
+      SELECT * FROM snapshots
+      WHERE pipeline_mode = ${mode}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `) as Snapshot[])
+    : ((await sql`
+      SELECT * FROM snapshots
+      ORDER BY created_at DESC
+      LIMIT 1
+    `) as Snapshot[]);
   return rows[0] ?? null;
 }
 
-export async function getLatestSnapshotWithKeywords(): Promise<Snapshot | null> {
-  const rows = (await sql`
-    SELECT s.* FROM snapshots s
-    WHERE EXISTS (
-      SELECT 1 FROM keywords k
-      WHERE k.snapshot_id = s.snapshot_id
-    )
-    ORDER BY s.created_at DESC
-    LIMIT 1
-  `) as Snapshot[];
+export async function getLatestSnapshotWithKeywords(
+  mode?: PipelineMode
+): Promise<Snapshot | null> {
+  const rows = mode
+    ? ((await sql`
+      SELECT s.* FROM snapshots s
+      WHERE s.pipeline_mode = ${mode}
+        AND EXISTS (
+          SELECT 1 FROM keywords k
+          WHERE k.snapshot_id = s.snapshot_id
+        )
+      ORDER BY s.created_at DESC
+      LIMIT 1
+    `) as Snapshot[])
+    : ((await sql`
+      SELECT s.* FROM snapshots s
+      WHERE EXISTS (
+        SELECT 1 FROM keywords k
+        WHERE k.snapshot_id = s.snapshot_id
+      )
+      ORDER BY s.created_at DESC
+      LIMIT 1
+    `) as Snapshot[]);
   return rows[0] ?? null;
 }
 
-export async function getRecentSnapshots(limit: number): Promise<Snapshot[]> {
+export async function getRecentSnapshots(
+  limit: number,
+  mode?: PipelineMode
+): Promise<Snapshot[]> {
+  if (mode) {
+    return (await sql`
+      SELECT * FROM snapshots
+      WHERE pipeline_mode = ${mode}
+      ORDER BY created_at DESC
+      LIMIT ${limit}
+    `) as Snapshot[];
+  }
+
   return (await sql`
     SELECT * FROM snapshots
     ORDER BY created_at DESC
     LIMIT ${limit}
   `) as Snapshot[];
+}
+
+export async function getSourceIngestionStates(): Promise<
+  SourceIngestionState[]
+> {
+  return (await sql`
+    SELECT *
+    FROM source_ingestion_state
+  `) as SourceIngestionState[];
+}
+
+export async function upsertSourceIngestionState(state: {
+  source_key: string;
+  last_success_at_utc: string;
+  last_published_at_utc: string | null;
+  last_item_count: number;
+  last_window_hours: number;
+}): Promise<void> {
+  await sql`
+    INSERT INTO source_ingestion_state (
+      source_key,
+      last_success_at_utc,
+      last_published_at_utc,
+      last_item_count,
+      last_window_hours,
+      updated_at
+    )
+    VALUES (
+      ${state.source_key},
+      ${state.last_success_at_utc},
+      ${state.last_published_at_utc},
+      ${state.last_item_count},
+      ${state.last_window_hours},
+      NOW()
+    )
+    ON CONFLICT (source_key) DO UPDATE
+    SET last_success_at_utc = EXCLUDED.last_success_at_utc,
+        last_published_at_utc = EXCLUDED.last_published_at_utc,
+        last_item_count = EXCLUDED.last_item_count,
+        last_window_hours = EXCLUDED.last_window_hours,
+        updated_at = NOW()
+  `;
 }
 
 export async function findCachedKeyword(
@@ -112,8 +510,13 @@ export async function getSnapshotById(
 
 export async function insertSnapshot(snapshot: Omit<Snapshot, "created_at">): Promise<void> {
   await sql`
-    INSERT INTO snapshots (snapshot_id, updated_at_utc, next_update_at_utc)
-    VALUES (${snapshot.snapshot_id}, ${snapshot.updated_at_utc}, ${snapshot.next_update_at_utc})
+    INSERT INTO snapshots (snapshot_id, pipeline_mode, updated_at_utc, next_update_at_utc)
+    VALUES (
+      ${snapshot.snapshot_id},
+      ${snapshot.pipeline_mode},
+      ${snapshot.updated_at_utc},
+      ${snapshot.next_update_at_utc}
+    )
     ON CONFLICT (snapshot_id) DO NOTHING
   `;
 }
@@ -146,6 +549,77 @@ export async function getTopKeywords(
   `) as Keyword[];
 }
 
+export async function getHotKeywords(
+  lifecycleDays: number,
+  limit = 10,
+  topRankLimit = 10,
+  mode?: PipelineMode
+): Promise<HotKeyword[]> {
+  if (mode) {
+    return (await sql`
+      WITH active_keyword_ids AS (
+        SELECT DISTINCT k.keyword_id
+        FROM keywords k
+        JOIN snapshots s ON s.snapshot_id = k.snapshot_id
+        WHERE k.rank <= ${topRankLimit}
+          AND s.pipeline_mode = ${mode}
+          AND s.created_at >= NOW() - (${lifecycleDays} * INTERVAL '1 day')
+      ),
+      latest_keywords AS (
+        SELECT DISTINCT ON (k.keyword_id)
+          k.*,
+          s.updated_at_utc AS snapshot_updated_at_utc
+        FROM keywords k
+        JOIN snapshots s ON s.snapshot_id = k.snapshot_id
+        JOIN active_keyword_ids a ON a.keyword_id = k.keyword_id
+        WHERE s.pipeline_mode = ${mode}
+        ORDER BY k.keyword_id, s.created_at DESC
+      )
+      SELECT
+        lk.*,
+        COALESCE(vc.view_count, 0)::int AS view_count,
+        vc.last_viewed_at
+      FROM latest_keywords lk
+      LEFT JOIN keyword_view_counts vc ON vc.keyword_id = lk.keyword_id
+      ORDER BY
+        COALESCE(vc.view_count, 0) DESC,
+        vc.last_viewed_at DESC NULLS LAST,
+        lk.rank ASC
+      LIMIT ${limit}
+    `) as HotKeyword[];
+  }
+
+  return (await sql`
+    WITH active_keyword_ids AS (
+      SELECT DISTINCT k.keyword_id
+      FROM keywords k
+      JOIN snapshots s ON s.snapshot_id = k.snapshot_id
+      WHERE k.rank <= ${topRankLimit}
+        AND s.created_at >= NOW() - (${lifecycleDays} * INTERVAL '1 day')
+    ),
+    latest_keywords AS (
+      SELECT DISTINCT ON (k.keyword_id)
+        k.*,
+        s.updated_at_utc AS snapshot_updated_at_utc
+      FROM keywords k
+      JOIN snapshots s ON s.snapshot_id = k.snapshot_id
+      JOIN active_keyword_ids a ON a.keyword_id = k.keyword_id
+      ORDER BY k.keyword_id, s.created_at DESC
+    )
+    SELECT
+      lk.*,
+      COALESCE(vc.view_count, 0)::int AS view_count,
+      vc.last_viewed_at
+    FROM latest_keywords lk
+    LEFT JOIN keyword_view_counts vc ON vc.keyword_id = lk.keyword_id
+    ORDER BY
+      COALESCE(vc.view_count, 0) DESC,
+      vc.last_viewed_at DESC NULLS LAST,
+      lk.rank ASC
+    LIMIT ${limit}
+  `) as HotKeyword[];
+}
+
 export async function getKeywordById(
   keywordId: string,
   snapshotId: string
@@ -173,21 +647,66 @@ export async function getKeywordInLatestSnapshot(
 export async function insertKeyword(keyword: Omit<Keyword, "created_at">): Promise<void> {
   await sql`
     INSERT INTO keywords (
-      snapshot_id, keyword_id, keyword, rank, delta_rank, is_new,
-      score, score_recency, score_frequency, score_authority, score_internal,
+      snapshot_id, keyword_id, keyword, keyword_ko, keyword_en, rank, delta_rank, is_new,
+      score, score_recency, score_frequency, score_authority, score_velocity, score_internal,
       summary_short, summary_short_en, primary_type,
-      top_source_title, top_source_url, top_source_domain, top_source_image_url
+      top_source_title, top_source_title_ko, top_source_title_en,
+      top_source_url, top_source_domain, top_source_image_url
     ) VALUES (
       ${keyword.snapshot_id}, ${keyword.keyword_id}, ${keyword.keyword},
+      ${keyword.keyword_ko}, ${keyword.keyword_en},
       ${keyword.rank}, ${keyword.delta_rank}, ${keyword.is_new},
       ${keyword.score}, ${keyword.score_recency}, ${keyword.score_frequency},
-      ${keyword.score_authority}, ${keyword.score_internal},
+      ${keyword.score_authority}, ${keyword.score_velocity}, ${keyword.score_internal},
       ${keyword.summary_short}, ${keyword.summary_short_en}, ${keyword.primary_type},
-      ${keyword.top_source_title}, ${keyword.top_source_url},
+      ${keyword.top_source_title}, ${keyword.top_source_title_ko}, ${keyword.top_source_title_en},
+      ${keyword.top_source_url},
       ${keyword.top_source_domain}, ${keyword.top_source_image_url}
     )
     ON CONFLICT (snapshot_id, keyword_id) DO NOTHING
   `;
+}
+
+function normalizeAlias(alias: string): string {
+  return alias.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function detectAliasLang(alias: string): "ko" | "en" {
+  if (/[\uAC00-\uD7AF\u3130-\u318F\u1100-\u11FF]/.test(alias)) return "ko";
+  return "en";
+}
+
+export async function upsertKeywordAliases(
+  canonicalKeywordId: string,
+  aliases: string[]
+): Promise<void> {
+  const normalizedCanonicalId = canonicalKeywordId.trim();
+  if (!normalizedCanonicalId) return;
+
+  const dedupedAliases = [...new Set(
+    aliases
+      .map(normalizeAlias)
+      .filter((alias) => alias.length > 0)
+  )].slice(0, 30);
+  if (dedupedAliases.length === 0) return;
+
+  await Promise.all(
+    dedupedAliases.map((alias) =>
+      sql`
+        INSERT INTO keyword_aliases (
+          canonical_keyword_id,
+          alias,
+          lang
+        )
+        VALUES (
+          ${normalizedCanonicalId},
+          ${alias},
+          ${detectAliasLang(alias)}
+        )
+        ON CONFLICT (canonical_keyword_id, alias) DO NOTHING
+      `
+    )
+  );
 }
 
 export async function getPreviousRanks(
@@ -199,10 +718,8 @@ export async function getPreviousRanks(
   const rows = (await sql`
     SELECT k.keyword_id, k.rank
     FROM keywords k
-    JOIN snapshots s ON k.snapshot_id = s.snapshot_id
     WHERE k.keyword_id = ANY(${keywordIds})
-      AND s.created_at < (SELECT created_at FROM snapshots WHERE snapshot_id = ${snapshotId})
-    ORDER BY s.created_at DESC
+      AND k.snapshot_id = ${snapshotId}
   `) as { keyword_id: string; rank: number }[];
 
   const map = new Map<string, number>();
@@ -250,6 +767,179 @@ export async function insertSource(
   `;
 }
 
+// ─── Retention / archival queries ─────────────────────────────────────────────
+
+export async function upsertKeywordDailyStats(aggregateDays: number): Promise<number> {
+  const rows = (await sql`
+    WITH daily AS (
+      SELECT
+        (s.created_at AT TIME ZONE 'UTC')::date AS stat_date,
+        k.keyword_id,
+        COALESCE(
+          NULLIF(
+            (ARRAY_AGG(NULLIF(k.keyword_ko, '') ORDER BY s.created_at DESC))[1],
+            ''
+          ),
+          (ARRAY_AGG(k.keyword ORDER BY s.created_at DESC))[1]
+        ) AS keyword_ko,
+        COALESCE(
+          NULLIF(
+            (ARRAY_AGG(NULLIF(k.keyword_en, '') ORDER BY s.created_at DESC))[1],
+            ''
+          ),
+          (ARRAY_AGG(k.keyword ORDER BY s.created_at DESC))[1]
+        ) AS keyword_en,
+        (ARRAY_AGG(k.primary_type ORDER BY s.created_at DESC))[1] AS primary_type,
+        COUNT(DISTINCT k.snapshot_id)::int AS snapshot_count,
+        COUNT(*)::int AS appearance_count,
+        MIN(k.rank)::int AS best_rank,
+        AVG(k.rank)::float8 AS avg_rank,
+        AVG(k.score)::float8 AS avg_score,
+        MAX(s.updated_at_utc) AS last_seen_at_utc
+      FROM keywords k
+      JOIN snapshots s ON s.snapshot_id = k.snapshot_id
+      WHERE s.created_at >= NOW() - (${aggregateDays} * INTERVAL '1 day')
+      GROUP BY 1, 2
+    )
+    INSERT INTO keyword_daily_stats (
+      stat_date, keyword_id, keyword_ko, keyword_en, primary_type,
+      snapshot_count, appearance_count, best_rank, avg_rank, avg_score,
+      last_seen_at_utc, updated_at
+    )
+    SELECT
+      stat_date, keyword_id, keyword_ko, keyword_en, primary_type,
+      snapshot_count, appearance_count, best_rank, avg_rank, avg_score,
+      last_seen_at_utc, NOW()
+    FROM daily
+    ON CONFLICT (stat_date, keyword_id) DO UPDATE
+    SET keyword_ko = EXCLUDED.keyword_ko,
+        keyword_en = EXCLUDED.keyword_en,
+        primary_type = EXCLUDED.primary_type,
+        snapshot_count = EXCLUDED.snapshot_count,
+        appearance_count = EXCLUDED.appearance_count,
+        best_rank = EXCLUDED.best_rank,
+        avg_rank = EXCLUDED.avg_rank,
+        avg_score = EXCLUDED.avg_score,
+        last_seen_at_utc = EXCLUDED.last_seen_at_utc,
+        updated_at = NOW()
+    RETURNING stat_date
+  `) as { stat_date: string }[];
+
+  return rows.length;
+}
+
+export async function deleteDailyKeywordStatsOlderThan(
+  aggregateDays: number
+): Promise<number> {
+  const rows = (await sql`
+    DELETE FROM keyword_daily_stats
+    WHERE stat_date < (NOW() - (${aggregateDays} * INTERVAL '1 day'))::date
+    RETURNING stat_date
+  `) as { stat_date: string }[];
+
+  return rows.length;
+}
+
+export async function deleteSourcesOlderThan(
+  detailedDays: number
+): Promise<number> {
+  const rows = (await sql`
+    DELETE FROM sources src
+    USING snapshots s
+    WHERE src.snapshot_id = s.snapshot_id
+      AND s.created_at < NOW() - (${detailedDays} * INTERVAL '1 day')
+    RETURNING src.id
+  `) as { id: number }[];
+
+  return rows.length;
+}
+
+export async function deleteKeywordsOlderThan(
+  detailedDays: number
+): Promise<number> {
+  const rows = (await sql`
+    DELETE FROM keywords k
+    USING snapshots s
+    WHERE k.snapshot_id = s.snapshot_id
+      AND s.created_at < NOW() - (${detailedDays} * INTERVAL '1 day')
+    RETURNING k.keyword_id
+  `) as { keyword_id: string }[];
+
+  return rows.length;
+}
+
+export async function deleteSnapshotsOlderThan(
+  detailedDays: number
+): Promise<number> {
+  const rows = (await sql`
+    DELETE FROM snapshots s
+    WHERE s.created_at < NOW() - (${detailedDays} * INTERVAL '1 day')
+    RETURNING s.snapshot_id
+  `) as { snapshot_id: string }[];
+
+  return rows.length;
+}
+
+export async function deleteOrphanKeywordAliases(): Promise<number> {
+  const rows = (await sql`
+    DELETE FROM keyword_aliases ka
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM keywords k
+      WHERE k.keyword_id = ka.canonical_keyword_id
+    )
+    RETURNING ka.canonical_keyword_id
+  `) as { canonical_keyword_id: string }[];
+
+  return rows.length;
+}
+
+export async function deleteKeywordViewCountsOutsideLifecycle(
+  lifecycleDays: number,
+  topRankLimit = 10
+): Promise<number> {
+  const rows = (await sql`
+    DELETE FROM keyword_view_counts vc
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM keywords k
+      JOIN snapshots s ON s.snapshot_id = k.snapshot_id
+      WHERE k.keyword_id = vc.keyword_id
+        AND k.rank <= ${topRankLimit}
+        AND s.created_at >= NOW() - (${lifecycleDays} * INTERVAL '1 day')
+    )
+    RETURNING vc.keyword_id
+  `) as { keyword_id: string }[];
+
+  return rows.length;
+}
+
+export async function applyRetentionPolicy(
+  detailedDays: number,
+  aggregateDays: number,
+  keywordViewLifecycleDays: number
+): Promise<RetentionCounts> {
+  const aggregatedRows = await upsertKeywordDailyStats(aggregateDays);
+  const deletedDailyStats = await deleteDailyKeywordStatsOlderThan(aggregateDays);
+  const deletedSources = await deleteSourcesOlderThan(detailedDays);
+  const deletedKeywords = await deleteKeywordsOlderThan(detailedDays);
+  const deletedSnapshots = await deleteSnapshotsOlderThan(detailedDays);
+  const deletedKeywordAliases = await deleteOrphanKeywordAliases();
+  const deletedKeywordViewCounts = await deleteKeywordViewCountsOutsideLifecycle(
+    keywordViewLifecycleDays
+  );
+
+  return {
+    aggregatedRows,
+    deletedDailyStats,
+    deletedSources,
+    deletedKeywords,
+    deletedSnapshots,
+    deletedKeywordAliases,
+    deletedKeywordViewCounts,
+  };
+}
+
 // ─── Search queries ───────────────────────────────────────────────────────────
 
 export async function searchKeywordsByText(
@@ -262,7 +952,12 @@ export async function searchKeywordsByText(
     SELECT DISTINCT k.* FROM keywords k
     LEFT JOIN keyword_aliases ka ON k.keyword_id = ka.canonical_keyword_id
     WHERE k.snapshot_id = ${snapshotId}
-      AND (k.keyword ILIKE ${pattern} OR ka.alias ILIKE ${pattern})
+      AND (
+        k.keyword ILIKE ${pattern}
+        OR k.keyword_ko ILIKE ${pattern}
+        OR k.keyword_en ILIKE ${pattern}
+        OR ka.alias ILIKE ${pattern}
+      )
     ORDER BY k.rank ASC
     LIMIT ${limit}
   `) as Keyword[];
@@ -276,5 +971,25 @@ export async function incrementSearchCount(query: string): Promise<void> {
     ON CONFLICT (query) DO UPDATE
     SET count = search_counts.count + 1,
         last_searched_at = NOW()
+  `;
+}
+
+export async function incrementKeywordViewCount(keywordId: string): Promise<void> {
+  const normalized = keywordId.trim();
+  if (!normalized) return;
+
+  await sql`
+    INSERT INTO keyword_view_counts (
+      keyword_id,
+      view_count,
+      last_viewed_at,
+      created_at,
+      updated_at
+    )
+    VALUES (${normalized}, 1, NOW(), NOW(), NOW())
+    ON CONFLICT (keyword_id) DO UPDATE
+    SET view_count = keyword_view_counts.view_count + 1,
+        last_viewed_at = NOW(),
+        updated_at = NOW()
   `;
 }

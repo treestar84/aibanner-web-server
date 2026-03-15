@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  getActiveManualKeywordIds,
   getLatestSnapshotWithKeywords,
   getSourcesByKeyword,
   searchKeywordsByText,
@@ -7,6 +8,8 @@ import {
 } from "@/lib/db/queries";
 import { collectSources } from "@/lib/pipeline/tavily";
 import { classifySourceCategory } from "@/lib/pipeline/source_category";
+import { batchTranslateTitles } from "@/lib/pipeline/summarize";
+import { filterActiveSnapshotKeywords } from "@/lib/manual-keywords";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -38,8 +41,14 @@ export async function GET(req: NextRequest) {
     if (snapshot) {
       // Try DB search first
       const keywords = await searchKeywordsByText(q.trim(), snapshot.snapshot_id);
-      if (keywords.length > 0) {
-        const keyword = keywords[0];
+      const activeManualKeywordIds = await getActiveManualKeywordIds(snapshot.pipeline_mode);
+      const visibleKeywords = filterActiveSnapshotKeywords(
+        keywords,
+        activeManualKeywordIds
+      );
+
+      if (visibleKeywords.length > 0) {
+        const keyword = visibleKeywords[0];
         const sources = await getSourcesByKeyword(snapshot.snapshot_id, keyword.keyword_id);
         if (sources.length === 0) {
           // Lightweight 키워드(11~20)일 수 있으므로 Tavily fallback으로 계속 진행
@@ -73,7 +82,9 @@ export async function GET(req: NextRequest) {
 
           return NextResponse.json({
             id: keyword.keyword_id,
-            keyword: keyword.keyword,
+            keyword: lang === "en"
+              ? (keyword.keyword_en || keyword.keyword)
+              : (keyword.keyword_ko || keyword.keyword),
             updatedAt: keyword.created_at,
             summary: lang === "en"
               ? (keyword.summary_short_en || keyword.summary_short)
@@ -87,13 +98,24 @@ export async function GET(req: NextRequest) {
 
     // Tavily fallback
     const tavilySources = await collectSources(q.trim());
-
-    const grouped = SOURCE_TYPES.map((type) => ({
+    const fallbackGroups = SOURCE_TYPES.map((type) => ({
       type,
-      items: (tavilySources[type] ?? [])
-        .slice(0, limit)
+      items: (tavilySources[type] ?? []).slice(0, limit),
+    }));
+
+    const fallbackTitles = fallbackGroups.flatMap((group) =>
+      group.items.map((item) => item.title)
+    );
+    const translatedFallbackTitles = lang === "ko"
+      ? await batchTranslateTitles(fallbackTitles, "ko")
+      : fallbackTitles;
+    let titleCursor = 0;
+
+    const grouped = fallbackGroups.map((group) => ({
+      type: group.type,
+      items: group.items
         .map((s) => ({
-          title: s.title,
+          title: translatedFallbackTitles[titleCursor++] ?? s.title,
           url: s.url,
           source: s.domain,
           publishedAt: s.publishedAt,
@@ -107,10 +129,13 @@ export async function GET(req: NextRequest) {
       tavilySources.social[0]?.snippet ??
       tavilySources.data[0]?.snippet ??
       "";
+    const fallbackKeyword = lang === "ko"
+      ? (await batchTranslateTitles([q.trim()], "ko"))[0] ?? q.trim()
+      : q.trim();
 
     return NextResponse.json({
       id: `search_${normalized}`,
-      keyword: q.trim(),
+      keyword: fallbackKeyword,
       updatedAt: new Date().toISOString(),
       summary: firstSnippet,
       bullets: [],

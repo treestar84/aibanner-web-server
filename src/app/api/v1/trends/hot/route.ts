@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getActiveManualKeywordIds,
+  getHotKeywords,
   getLatestSnapshotWithKeywords,
-  getTopKeywords,
 } from "@/lib/db/queries";
 import { normalizePrimaryType } from "@/lib/pipeline/source_category";
 import { parsePipelineMode } from "@/lib/pipeline/mode";
@@ -12,13 +12,31 @@ import { filterActiveSnapshotKeywords } from "@/lib/manual-keywords";
 export const runtime = "nodejs";
 export const revalidate = 0;
 
+function parsePositiveInt(
+  value: string | null | undefined,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed < min) return min;
+  if (parsed > max) return max;
+  return parsed;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const limitParam = url.searchParams.get("limit");
-    const limit = Math.min(50, Math.max(1, parseInt(limitParam ?? "10", 10)));
+    const limit = parsePositiveInt(url.searchParams.get("limit"), 10, 1, 50);
     const lang = url.searchParams.get("lang") === "en" ? "en" : "ko";
-    const requestedMode = parsePipelineMode(url.searchParams.get("mode"), "realtime");
+    const lifecycleDays = parsePositiveInt(
+      process.env.RETENTION_KEYWORD_VIEW_DAYS,
+      3,
+      1,
+      30
+    );
+    const requestedMode = parsePipelineMode(url.searchParams.get("mode"), "briefing");
 
     const snapshot =
       (await getLatestSnapshotWithKeywords(requestedMode)) ??
@@ -30,9 +48,11 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const keywords = await getTopKeywords(
-      snapshot.snapshot_id,
-      Math.max(limit * 4, 100)
+    const keywords = await getHotKeywords(
+      lifecycleDays,
+      Math.max(limit * 4, 100),
+      10,
+      snapshot.pipeline_mode
     );
     const activeManualKeywordIds = await getActiveManualKeywordIds(snapshot.pipeline_mode);
     const visibleKeywords = filterActiveSnapshotKeywords(
@@ -46,7 +66,7 @@ export async function GET(req: NextRequest) {
         freshness: buildFreshness(snapshot.updated_at_utc),
         snapshotId: snapshot.snapshot_id,
         updatedAt: snapshot.updated_at_utc,
-        nextUpdateAt: snapshot.next_update_at_utc,
+        lifecycleDays,
         items: visibleKeywords.map((kw) => {
           const localizedKeyword = lang === "en"
             ? (kw.keyword_en || kw.keyword)
@@ -56,26 +76,20 @@ export async function GET(req: NextRequest) {
             : (kw.top_source_title_ko || kw.top_source_title);
 
           return {
+            id: kw.keyword_id,
+            keyword: localizedKeyword,
+            rank: kw.rank,
+            deltaRank: kw.delta_rank,
+            isNew: kw.is_new,
+            viewCount: kw.view_count,
+            lastViewedAt: kw.last_viewed_at,
+            summaryShort: lang === "en" ? (kw.summary_short_en || kw.summary_short) : kw.summary_short,
             primaryType: normalizePrimaryType(kw.primary_type, {
               type: kw.primary_type,
               domain: kw.top_source_domain,
               url: kw.top_source_url,
               title: localizedTopTitle,
             }),
-            id: kw.keyword_id,
-            rank: kw.rank,
-            keyword: localizedKeyword,
-            deltaRank: kw.delta_rank,
-            isNew: kw.is_new,
-            score: kw.score,
-            scoreBreakdown: {
-              recency: kw.score_recency,
-              frequency: kw.score_frequency,
-              authority: kw.score_authority,
-              velocity: kw.score_velocity,
-              internal: kw.score_internal,
-            },
-            summaryShort: lang === "en" ? kw.summary_short_en || kw.summary_short : kw.summary_short,
             topSource: kw.top_source_url
               ? {
                   title: localizedTopTitle,
@@ -90,12 +104,12 @@ export async function GET(req: NextRequest) {
       },
       {
         headers: {
-          "Cache-Control": cacheControlByMode(snapshot.pipeline_mode, "top"),
+          "Cache-Control": cacheControlByMode(snapshot.pipeline_mode, "hot"),
         },
       }
     );
   } catch (err) {
-    console.error("[/api/v1/trends/top]", err);
+    console.error("[/api/v1/trends/hot]", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

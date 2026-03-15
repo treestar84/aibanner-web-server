@@ -50,66 +50,77 @@ export default async function TrendsPage() {
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
       {/* Header */}
-      <header className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight mb-1">
-          AI 트렌드 실검
-        </h1>
-        <p className="text-sm text-gray-400">
-          업데이트: {formatKST(snapshot.updated_at_utc)} KST ·{" "}
-          다음 업데이트: {formatKST(snapshot.next_update_at_utc)} KST
-        </p>
+      <header className="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight mb-1">
+            AI 트렌드 실검
+          </h1>
+          <p className="text-sm text-gray-400">
+            업데이트: {formatKST(snapshot.updated_at_utc)} KST ·{" "}
+            다음 업데이트: {formatKST(snapshot.next_update_at_utc)} KST
+          </p>
+        </div>
+        <Link
+          href="/burning"
+          className="inline-flex items-center gap-1.5 rounded-full border border-red-300/25 bg-red-600/15 px-3 py-1.5 text-xs font-semibold text-red-100 hover:bg-red-500/25 transition-colors shrink-0"
+        >
+          🔥 타는중
+        </Link>
       </header>
 
       {/* Trend list */}
       <ol className="space-y-3">
-        {keywords.map((kw) => (
-          <li key={kw.keyword_id}>
-            <Link
-              href={`/k/${kw.keyword_id}`}
-              className="flex items-start gap-4 p-4 rounded-xl bg-gray-900 hover:bg-gray-800 transition-colors group"
-            >
-              {/* Rank */}
-              <span
-                className={`text-2xl font-black w-8 shrink-0 text-right leading-none pt-0.5 ${
-                  kw.rank <= 3 ? "text-indigo-400" : "text-gray-600"
-                }`}
+        {keywords.map((kw) => {
+          const displayKeyword = kw.keyword_ko || kw.keyword;
+          return (
+            <li key={kw.keyword_id}>
+              <Link
+                href={`/k/${kw.keyword_id}`}
+                className="flex items-start gap-4 p-4 rounded-xl bg-gray-900 hover:bg-gray-800 transition-colors group"
               >
-                {kw.rank}
-              </span>
+                {/* Rank */}
+                <span
+                  className={`text-2xl font-black w-8 shrink-0 text-right leading-none pt-0.5 ${
+                    kw.rank <= 3 ? "text-indigo-400" : "text-gray-600"
+                  }`}
+                >
+                  {kw.rank}
+                </span>
 
-              {/* Thumbnail */}
-              {kw.top_source_image_url && (
-                <div className="w-14 h-14 shrink-0 rounded-lg overflow-hidden bg-gray-800">
-                  <Image
-                    src={kw.top_source_image_url}
-                    alt={kw.keyword}
-                    width={56}
-                    height={56}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              )}
-
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-semibold text-base group-hover:text-indigo-300 transition-colors truncate">
-                    {kw.keyword}
-                  </span>
-                  <DeltaBadge delta={kw.delta_rank} isNew={kw.is_new} />
-                </div>
-                <p className="text-sm text-gray-400 line-clamp-2">
-                  {kw.summary_short}
-                </p>
-                {kw.top_source_domain && (
-                  <p className="text-xs text-gray-600 mt-1">
-                    {kw.top_source_domain}
-                  </p>
+                {/* Thumbnail */}
+                {kw.top_source_image_url && (
+                  <div className="w-14 h-14 shrink-0 rounded-lg overflow-hidden bg-gray-800">
+                    <Image
+                      src={kw.top_source_image_url}
+                      alt={displayKeyword}
+                      width={56}
+                      height={56}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
                 )}
-              </div>
-            </Link>
-          </li>
-        ))}
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-semibold text-base group-hover:text-indigo-300 transition-colors truncate">
+                      {displayKeyword}
+                    </span>
+                    <DeltaBadge delta={kw.delta_rank} isNew={kw.is_new} />
+                  </div>
+                  <p className="text-sm text-gray-400 line-clamp-2">
+                    {kw.summary_short}
+                  </p>
+                  {kw.top_source_domain && (
+                    <p className="text-xs text-gray-600 mt-1">
+                      {kw.top_source_domain}
+                    </p>
+                  )}
+                </div>
+              </Link>
+            </li>
+          );
+        })}
       </ol>
 
       <footer className="mt-8 text-center text-xs text-gray-600">

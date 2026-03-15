@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runSnapshotPipeline } from "@/lib/pipeline/snapshot";
+import { parsePipelineMode } from "@/lib/pipeline/mode";
+import {
+  runRetentionPolicy,
+  type RetentionRunResult,
+} from "@/lib/pipeline/retention";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // Hobby 플랜 함수 허용치 내에서 여유 확보
@@ -17,15 +22,34 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const mode = parsePipelineMode(req.nextUrl.searchParams.get("mode"), "briefing");
+    const runRetention =
+      req.nextUrl.searchParams.get("retention") === "1" || mode === "briefing";
     const startedAt = Date.now();
-    const result = await runSnapshotPipeline();
+    const result = await runSnapshotPipeline({ mode });
+    let retention: RetentionRunResult | null = null;
+    let retentionError: string | null = null;
+
+    if (runRetention) {
+      try {
+        retention = await runRetentionPolicy();
+      } catch (retentionErr) {
+        retentionError = String(retentionErr);
+        console.error("[cron/retention]", retentionErr);
+      }
+    }
+
     const durationMs = Date.now() - startedAt;
     return NextResponse.json({
       ok: true,
+      mode: result.mode,
       snapshotId: result.snapshotId,
       keywordCount: result.keywordCount,
       reusedCount: result.reusedCount,
       newCount: result.keywordCount - result.reusedCount,
+      retentionExecuted: runRetention,
+      retention,
+      retentionError,
       durationMs,
     });
   } catch (err) {

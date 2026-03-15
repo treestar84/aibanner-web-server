@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  getActiveManualKeywordIds,
   getLatestSnapshotWithKeywords,
   getSnapshotById,
   getKeywordById,
   getKeywordInLatestSnapshot,
   getSourcesByKeyword,
 } from "@/lib/db/queries";
+import { isManualKeywordId } from "@/lib/manual-keywords";
 import { classifySourceCategory } from "@/lib/pipeline/source_category";
 
 export const runtime = "nodejs";
@@ -25,12 +27,14 @@ export async function GET(
     const lang = url.searchParams.get("lang") === "en" ? "en" : "ko";
 
     let snapshotId: string;
+    let snapshotMode: "realtime" | "briefing";
     if (snapshotIdParam) {
       const snap = await getSnapshotById(snapshotIdParam);
       if (!snap) {
         return NextResponse.json({ error: "Snapshot not found" }, { status: 404 });
       }
       snapshotId = snap.snapshot_id;
+      snapshotMode = snap.pipeline_mode;
     } else {
       const latest = await getLatestSnapshotWithKeywords();
       if (!latest) {
@@ -40,6 +44,7 @@ export async function GET(
         );
       }
       snapshotId = latest.snapshot_id;
+      snapshotMode = latest.pipeline_mode;
     }
 
     const keyword = snapshotIdParam
@@ -48,6 +53,21 @@ export async function GET(
 
     if (!keyword) {
       return NextResponse.json({ error: "Keyword not found" }, { status: 404 });
+    }
+
+    if (!snapshotIdParam) {
+      const keywordSnapshot = await getSnapshotById(keyword.snapshot_id);
+      if (!keywordSnapshot) {
+        return NextResponse.json({ error: "Snapshot not found" }, { status: 404 });
+      }
+      snapshotMode = keywordSnapshot.pipeline_mode;
+    }
+
+    if (isManualKeywordId(keyword.keyword_id)) {
+      const activeManualKeywordIds = await getActiveManualKeywordIds(snapshotMode);
+      if (!activeManualKeywordIds.has(keyword.keyword_id)) {
+        return NextResponse.json({ error: "Keyword not found" }, { status: 404 });
+      }
     }
 
     const sources = await getSourcesByKeyword(keyword.snapshot_id, id);
@@ -77,11 +97,15 @@ export async function GET(
         })),
     })).filter((g) => g.items.length > 0);
 
+    const localizedKeyword = lang === "en"
+      ? (keyword.keyword_en || keyword.keyword)
+      : (keyword.keyword_ko || keyword.keyword);
+
     return NextResponse.json(
       {
         snapshotId: keyword.snapshot_id,
         id: keyword.keyword_id,
-        keyword: keyword.keyword,
+        keyword: localizedKeyword,
         updatedAt: keyword.created_at,
         summary: lang === "en"
           ? (keyword.summary_short_en || keyword.summary_short)

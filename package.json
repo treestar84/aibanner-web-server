@@ -6,8 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "node --import tsx --test src/**/*.test.ts",
     "lint": "next lint",
-    "db:migrate": "npx tsx scripts/db/migrate.ts"
+    "db:migrate": "npx tsx scripts/db/migrate.ts",
+    "admin:hash": "node scripts/admin/generate-admin-password-hash.mjs"
   },
   "dependencies": {
     "next": "^15.1.7",

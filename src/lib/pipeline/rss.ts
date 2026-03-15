@@ -96,10 +96,9 @@ function extractDomain(url: string): string {
   }
 }
 
-async function fetchFeed(config: RssFeedConfig): Promise<RssItem[]> {
+async function fetchFeed(config: RssFeedConfig, cutoff: Date): Promise<RssItem[]> {
   try {
     const feed = await parser.parseURL(config.url);
-    const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000); // 72h
 
     return feed.items
       .filter((item) => {
@@ -128,9 +127,11 @@ async function fetchFeed(config: RssFeedConfig): Promise<RssItem[]> {
 }
 
 export async function collectRssItems(
+  windowHours = 72,
   feeds: RssFeedConfig[] = RSS_FEEDS
 ): Promise<RssItem[]> {
-  const results = await Promise.allSettled(feeds.map(fetchFeed));
+  const cutoff = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+  const results = await Promise.allSettled(feeds.map((feed) => fetchFeed(feed, cutoff)));
 
   const all: RssItem[] = [];
   for (let i = 0; i < results.length; i++) {
