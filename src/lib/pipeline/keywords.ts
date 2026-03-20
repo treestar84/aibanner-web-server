@@ -176,6 +176,8 @@ export interface KeywordCandidate {
   matchedItems: Set<number>;
   latestAt: Date;
   tier: string;
+  domainBonus: number;
+  authorityOverride: number;
 }
 
 export interface NormalizedKeyword {
@@ -602,6 +604,8 @@ function matchKeywordsToItems(
       matchedItems: new Set<number>(),
       latestAt: new Date(0),
       tier: "P2_RAW",
+      domainBonus: 0,
+      authorityOverride: 0,
     };
 
     for (let idx = 0; idx < items.length; idx++) {
@@ -620,6 +624,18 @@ function matchKeywordsToItems(
         // 최고 tier 유지
         if ((TIER_ORDER[item.tier] ?? 9) < (TIER_ORDER[candidate.tier] ?? 9)) {
           candidate.tier = item.tier;
+        }
+        if (item.rankingSignals) {
+          for (const signal of item.rankingSignals) {
+            candidate.domainBonus = Math.max(
+              candidate.domainBonus,
+              signal.domainBonus ?? 0
+            );
+            candidate.authorityOverride = Math.max(
+              candidate.authorityOverride,
+              signal.authorityOverride ?? 0
+            );
+          }
         }
       }
     }
@@ -798,6 +814,11 @@ function mergeKeywordCandidates(
     matchedItems,
     latestAt,
     tier,
+    domainBonus: Math.max(0, ...entries.map((entry) => entry.candidate.domainBonus)),
+    authorityOverride: Math.max(
+      0,
+      ...entries.map((entry) => entry.candidate.authorityOverride)
+    ),
   };
 }
 
@@ -840,6 +861,8 @@ function consolidateKeywordVariants(
       matchedItems: new Set<number>(),
       latestAt: new Date(0),
       tier: "P2_RAW",
+      domainBonus: 0,
+      authorityOverride: 0,
     },
     signals: buildKeywordSignals(keyword),
   }));
@@ -944,6 +967,11 @@ function mergeCandidates(candidates: KeywordCandidate[], text: string): KeywordC
     matchedItems,
     latestAt,
     tier,
+    domainBonus: Math.max(0, ...candidates.map((candidate) => candidate.domainBonus)),
+    authorityOverride: Math.max(
+      0,
+      ...candidates.map((candidate) => candidate.authorityOverride)
+    ),
   };
 }
 
@@ -966,6 +994,8 @@ function enrichContextDependentKeywords(
       matchedItems: new Set<number>(),
       latestAt: new Date(0),
       tier: "P2_RAW",
+      domainBonus: 0,
+      authorityOverride: 0,
     };
     return {
       keyword,
@@ -1124,6 +1154,14 @@ function mergeNormalizedKeywordsById(items: NormalizedKeyword[]): NormalizedKeyw
     if ((TIER_ORDER[item.candidates.tier] ?? 9) < (TIER_ORDER[existing.candidates.tier] ?? 9)) {
       existing.candidates.tier = item.candidates.tier;
     }
+    existing.candidates.domainBonus = Math.max(
+      existing.candidates.domainBonus,
+      item.candidates.domainBonus
+    );
+    existing.candidates.authorityOverride = Math.max(
+      existing.candidates.authorityOverride,
+      item.candidates.authorityOverride
+    );
   }
 
   return [...byId.values()];

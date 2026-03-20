@@ -9,6 +9,13 @@ export interface RssFeedConfig {
   lang?: "ko" | "en";
 }
 
+export interface RssRankingSignal {
+  sourceKey: string;
+  authorityOverride?: number;
+  domainBonus?: number;
+  rank?: number | null;
+}
+
 export interface RssItem {
   title: string;
   link: string;
@@ -18,6 +25,7 @@ export interface RssItem {
   feedTitle: string;
   tier: RssFeedConfig["tier"];
   lang: string;
+  rankingSignals?: RssRankingSignal[];
 }
 
 // ─── RSS Feed list (AI-focused) ───────────────────────────────────────────────

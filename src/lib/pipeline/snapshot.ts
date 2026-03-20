@@ -6,6 +6,7 @@ import { collectGithubMdItems } from "./github_md_source";
 import { collectYoutubeItems } from "./youtube_source";
 import { collectGithubReleaseItems } from "./github_releases_source";
 import { collectChangelogItems } from "./changelog_source";
+import { collectProductHuntTopItems } from "./product_hunt_top_source";
 import type { RssItem } from "./rss";
 import { normalizeKeywords } from "./keywords";
 import { rankKeywords, calculateDeltaRanks } from "./scoring";
@@ -151,6 +152,7 @@ interface SourcePlan {
 }
 
 const SOURCE_PLANS: SourcePlan[] = [
+  { key: "product_hunt_top", collect: (windowHours) => collectProductHuntTopItems(windowHours) },
   { key: "rss", collect: (windowHours) => collectRssItems(windowHours) },
   { key: "hn", collect: (windowHours) => collectHnItems(windowHours) },
   { key: "gdelt", collect: (windowHours) => collectGdeltItems(windowHours) },
@@ -613,6 +615,8 @@ function createManualRankedItem(
         matchedItems: new Set(),
         latestAt: now,
         tier: "P0_CURATED",
+        domainBonus: 0,
+        authorityOverride: 0,
       },
     },
     score: {
@@ -954,6 +958,7 @@ export async function runSnapshotPipeline(
     sourceStates.map((state) => [state.source_key, state])
   );
   const [
+    productHuntTopItems,
     rssItems,
     hnItems,
     gdeltItems,
@@ -971,6 +976,7 @@ export async function runSnapshotPipeline(
   // URL 기준 중복 제거 후 합산 (P0_CURATED 소스 우선)
   const seenUrls = new Set<string>();
   const allItems = [
+    ...productHuntTopItems,
     ...rssItems,
     ...githubMdItems,
     ...githubReleaseItems,
@@ -985,7 +991,7 @@ export async function runSnapshotPipeline(
     return true;
   });
   console.log(
-    `[snapshot] Got ${allItems.length} items (rss=${rssItems.length}, githubMd=${githubMdItems.length}, githubRel=${githubReleaseItems.length}, changelog=${changelogItems.length}, youtube=${youtubeItems.length}, hn=${hnItems.length}, gdelt=${gdeltItems.length}, github=${githubItems.length})`
+    `[snapshot] Got ${allItems.length} items (productHuntTop=${productHuntTopItems.length}, rss=${rssItems.length}, githubMd=${githubMdItems.length}, githubRel=${githubReleaseItems.length}, changelog=${changelogItems.length}, youtube=${youtubeItems.length}, hn=${hnItems.length}, gdelt=${gdeltItems.length}, github=${githubItems.length})`
   );
 
   // 2~3) 키워드 추출 + 정규화 (AI 클러스터링)

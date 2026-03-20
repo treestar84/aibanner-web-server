@@ -110,6 +110,7 @@ npm run db:migrate
 - `CRON_SECRET`
 - `OPENAI_MODEL` (기본 `gpt-4o-mini`)
 - `GITHUB_TOKEN` (GitHub 소스 수집 품질/한도 개선)
+- `PRODUCT_HUNT_TOKEN` (Product Hunt Top Products Launching Today 반영)
 - `PIPELINE_*`, `TAVILY_*`, `RETENTION_*` 튜닝 값
 
 `.env.example`를 템플릿으로 복사 후 사용하세요.

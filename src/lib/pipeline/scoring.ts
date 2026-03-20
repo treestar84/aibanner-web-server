@@ -131,11 +131,17 @@ export function calculateScore(
   // recency: 실제 반감기 공식(half-life)
   const recency = Math.pow(0.5, ageHours / safeHalfLife);
 
-  // frequency: 유니크 도메인 수 기반 (최대 10개 도메인 → 1.0)
-  const frequency = Math.min(1, keyword.candidates.domains.size / 10);
+  // frequency: 유니크 도메인 수 + 보정 보너스 기반
+  const frequency = Math.min(
+    1,
+    (keyword.candidates.domains.size + keyword.candidates.domainBonus) / 10
+  );
 
-  // authority: tier 기반
-  const authority = TIER_AUTHORITY[keyword.candidates.tier] ?? 0.2;
+  // authority: tier 기반에 선택적 source override를 반영
+  const authority = Math.max(
+    TIER_AUTHORITY[keyword.candidates.tier] ?? 0.2,
+    keyword.candidates.authorityOverride
+  );
 
   const velocity = calculateVelocityScore(
     keyword,
