@@ -50,7 +50,7 @@ function buildEveryNHourSchedule(hours: number): string {
   return slots.join(",");
 }
 
-const DEFAULT_REALTIME_SCHEDULE_UTC = buildEveryNHourSchedule(2);
+const DEFAULT_REALTIME_SCHEDULE_UTC = buildEveryNHourSchedule(6);
 
 function parsePositiveIntEnv(
   value: string | undefined,

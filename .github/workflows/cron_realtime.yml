@@ -2,7 +2,7 @@ name: Snapshot Pipeline (Realtime)
 
 on:
   schedule:
-    - cron: "0 */2 * * *" # UTC every 2 hours
+    - cron: "0 */6 * * *" # UTC every 6 hours
   workflow_dispatch:
 
 concurrency:
