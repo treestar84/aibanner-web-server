@@ -573,7 +573,9 @@ export async function getHotKeywords(
         JOIN snapshots s ON s.snapshot_id = k.snapshot_id
         JOIN active_keyword_ids a ON a.keyword_id = k.keyword_id
         WHERE s.pipeline_mode = ${mode}
-        ORDER BY k.keyword_id, s.created_at DESC
+        ORDER BY k.keyword_id,
+          (CASE WHEN k.summary_short IS NOT NULL AND k.summary_short != '' THEN 0 ELSE 1 END),
+          s.created_at DESC
       )
       SELECT
         lk.*,
@@ -604,7 +606,9 @@ export async function getHotKeywords(
       FROM keywords k
       JOIN snapshots s ON s.snapshot_id = k.snapshot_id
       JOIN active_keyword_ids a ON a.keyword_id = k.keyword_id
-      ORDER BY k.keyword_id, s.created_at DESC
+      ORDER BY k.keyword_id,
+        (CASE WHEN k.summary_short IS NOT NULL AND k.summary_short != '' THEN 0 ELSE 1 END),
+        s.created_at DESC
     )
     SELECT
       lk.*,
@@ -638,7 +642,9 @@ export async function getKeywordInLatestSnapshot(
     SELECT k.* FROM keywords k
     JOIN snapshots s ON k.snapshot_id = s.snapshot_id
     WHERE k.keyword_id = ${keywordId}
-    ORDER BY s.created_at DESC
+    ORDER BY
+      (CASE WHEN k.summary_short IS NOT NULL AND k.summary_short != '' THEN 0 ELSE 1 END),
+      s.created_at DESC
     LIMIT 1
   `) as Keyword[];
   return rows[0] ?? null;
