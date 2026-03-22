@@ -15,7 +15,9 @@ AI 트렌드 키워드를 수집/랭킹/요약해서 웹 화면과 API로 제공
 - 스냅샷: Top20 생성, Top10은 상세 저장, 11~20은 lightweight 저장
 - 언어: `ko/en` 키워드/제목/요약 지원
 - 크론: `GET|POST /api/cron/snapshot` + `CRON_SECRET` 인증
-- 운영 스케줄: GitHub Actions 기준 **KST 09:17 / 18:17**
+- 운영 스케줄:
+  - realtime: **KST 05:00 / 11:00 / 17:00 / 23:00**
+  - briefing: **KST 09:17 / 18:17**
 - 보관 정책: retention 실행(상세 90일, 집계 365일 기본)
 
 ## 사용자 기능과 엔드포인트
@@ -26,7 +28,7 @@ AI 트렌드 키워드를 수집/랭킹/요약해서 웹 화면과 API로 제공
 | 키워드 상세 페이지 | `/k/:id` | 요약 + 출처 카드(news/social/data) |
 | 최신 메타 | `GET /api/v1/meta` | 최신 스냅샷 ID/업데이트/다음 업데이트 |
 | 랭킹 목록 | `GET /api/v1/trends/top?limit=10&lang=ko` | Top N 키워드 목록 |
-| 핫 키워드 | `GET /api/v1/trends/hot?limit=10&lang=ko` | 최근 3일 생존 키워드의 조회수 기반 랭킹 |
+| 핫 키워드 | `GET /api/v1/trends/hot?limit=10&lang=ko` | 최근 3일 realtime Top10 진입 키워드의 조회수 기반 랭킹 |
 | 키워드 상세 API | `GET /api/v1/keywords/:id?lang=ko` | 특정 키워드 상세 데이터 |
 | 자유 검색 | `GET /api/v1/search?q=...&lang=ko` | DB 검색 우선, 미매칭 시 Tavily fallback |
 | 스냅샷 실행 | `GET/POST /api/cron/snapshot` | 수집~랭킹~저장~retention 배치 실행 |
@@ -121,7 +123,8 @@ cp .env.example .env.local
 
 ## 운영 참고
 
-- 스냅샷 자동 트리거: `.github/workflows/cron.yml`
+- realtime 자동 트리거: `.github/workflows/cron_realtime.yml`
+- briefing 자동 트리거: `.github/workflows/cron.yml`
 - API 상세 문서: `doc/api.md`
 - 파이프라인 상세 문서: `doc/pipeline.md`
 
