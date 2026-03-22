@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getActiveManualKeywordIds,
   getHotKeywords,
+  getLatestSnapshot,
   getLatestSnapshotWithKeywords,
 } from "@/lib/db/queries";
 import { normalizePrimaryType } from "@/lib/pipeline/source_category";
@@ -36,11 +37,11 @@ export async function GET(req: NextRequest) {
       1,
       30
     );
-    const requestedMode = parsePipelineMode(url.searchParams.get("mode"), "briefing");
+    const requestedMode = parsePipelineMode(url.searchParams.get("mode"), "realtime");
 
     const snapshot =
       (await getLatestSnapshotWithKeywords(requestedMode)) ??
-      (await getLatestSnapshotWithKeywords());
+      (await getLatestSnapshot(requestedMode));
     if (!snapshot) {
       return NextResponse.json(
         { error: "No snapshot available yet" },
@@ -67,6 +68,7 @@ export async function GET(req: NextRequest) {
         snapshotId: snapshot.snapshot_id,
         updatedAt: snapshot.updated_at_utc,
         lifecycleDays,
+        topRankLimit: 10,
         items: visibleKeywords.map((kw) => {
           const localizedKeyword = lang === "en"
             ? (kw.keyword_en || kw.keyword)

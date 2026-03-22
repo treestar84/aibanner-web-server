@@ -65,7 +65,7 @@ function resolveFillRatio(value: number, maxValue: number): number {
 }
 
 export default async function BurningPage() {
-  const snapshot = await getLatestSnapshotWithKeywords();
+  const snapshot = await getLatestSnapshotWithKeywords("realtime");
 
   if (!snapshot) {
     return (
@@ -90,9 +90,9 @@ export default async function BurningPage() {
     lifecycleDays,
     100,
     10,
-    snapshot.pipeline_mode
+    "realtime"
   );
-  const activeManualKeywordIds = await getActiveManualKeywordIds(snapshot.pipeline_mode);
+  const activeManualKeywordIds = await getActiveManualKeywordIds("realtime");
   const visibleHotKeywords = filterActiveSnapshotKeywords(
     hotKeywords,
     activeManualKeywordIds
@@ -123,7 +123,7 @@ export default async function BurningPage() {
                   타는중 키워드
                 </h1>
                 <p className="text-sm text-red-100/80 mt-1">
-                  최근 {lifecycleDays}일 동안 조회가 쌓인 키워드
+                  최근 {lifecycleDays}일 동안 realtime Top 10에 진입한 뒤 조회가 쌓인 키워드
                 </p>
               </div>
               <span className={styles.fireBadge}>LIVE HEAT</span>
