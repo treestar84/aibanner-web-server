@@ -16,6 +16,7 @@ import { collectSources } from "./tavily";
 import { generateSummaries, batchTranslateTitles } from "./summarize";
 import { batchExtractOgImages } from "./og-parser";
 import { determinePrimaryType, pickPrimarySource } from "./source_category";
+import { resolveScheduleUtc, type ScheduleSlot } from "./schedule";
 import {
   buildManualKeywordId,
   normalizeManualKeywordLookupKey,
@@ -39,18 +40,6 @@ import type { Source, SourceIngestionState, ManualKeyword } from "@/lib/db/queri
 type RankedKeywordWithDelta = ReturnType<typeof calculateDeltaRanks>[number];
 const RANKING_CANDIDATE_LIMIT = 20;
 const DEFAULT_DETAILED_KEYWORD_LIMIT = 10;
-const DEFAULT_BRIEFING_SCHEDULE_UTC = "0:17,9:17";
-
-function buildEveryNHourSchedule(hours: number): string {
-  const step = Math.max(1, Math.min(12, Math.floor(hours)));
-  const slots: string[] = [];
-  for (let hour = 0; hour < 24; hour += step) {
-    slots.push(`${hour}:0`);
-  }
-  return slots.join(",");
-}
-
-const DEFAULT_REALTIME_SCHEDULE_UTC = buildEveryNHourSchedule(6);
 
 function parsePositiveIntEnv(
   value: string | undefined,
@@ -125,11 +114,6 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-interface ScheduleSlot {
-  hour: number;
-  minute: number;
-}
-
 interface SourceWindowProfile {
   minHours: number;
   fallbackHours: number;
@@ -162,45 +146,6 @@ const SOURCE_PLANS: SourcePlan[] = [
   { key: "github_releases", collect: (windowHours) => collectGithubReleaseItems(windowHours) },
   { key: "changelog", collect: (windowHours) => collectChangelogItems(windowHours) },
 ];
-
-function parseScheduleUtc(
-  value: string | undefined,
-  fallbackRaw: string
-): ScheduleSlot[] {
-  const raw = value?.trim() || fallbackRaw;
-  const slots = raw
-    .split(",")
-    .map((chunk) => chunk.trim())
-    .filter((chunk) => chunk.length > 0)
-    .map((chunk) => {
-      const [hourText, minuteText = "0"] = chunk.split(":");
-      const hour = Number.parseInt(hourText, 10);
-      const minute = Number.parseInt(minuteText, 10);
-      if (
-        !Number.isFinite(hour) ||
-        !Number.isFinite(minute) ||
-        hour < 0 ||
-        hour > 23 ||
-        minute < 0 ||
-        minute > 59
-      ) {
-        return null;
-      }
-      return { hour, minute };
-    })
-    .filter((slot): slot is ScheduleSlot => slot !== null)
-    .sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
-
-  if (slots.length === 0) {
-    return parseScheduleUtc(undefined, fallbackRaw);
-  }
-
-  return slots.filter((slot, index) => {
-    if (index === 0) return true;
-    const prev = slots[index - 1];
-    return prev.hour !== slot.hour || prev.minute !== slot.minute;
-  });
-}
 
 function resolveSourceWindowProfile(mode: PipelineMode): SourceWindowProfile {
   const legacyMin = process.env.PIPELINE_SOURCE_MIN_WINDOW_HOURS;
@@ -256,15 +201,7 @@ function resolveSourceWindowProfile(mode: PipelineMode): SourceWindowProfile {
 
 function resolveRuntimeProfile(mode: PipelineMode): PipelineRuntimeProfile {
   const isRealtime = mode === "realtime";
-  const defaultSchedule = isRealtime
-    ? DEFAULT_REALTIME_SCHEDULE_UTC
-    : DEFAULT_BRIEFING_SCHEDULE_UTC;
-  const scheduleUtc = parseScheduleUtc(
-    isRealtime
-      ? process.env.PIPELINE_REALTIME_SCHEDULE_UTC
-      : process.env.PIPELINE_BRIEFING_SCHEDULE_UTC ?? process.env.PIPELINE_SCHEDULE_UTC,
-    defaultSchedule
-  );
+  const scheduleUtc = resolveScheduleUtc(mode);
 
   const scoring: ScoringProfile = {
     recencyHalfLifeHours: parsePositiveFloatEnv(
