@@ -999,3 +999,113 @@ export async function incrementKeywordViewCount(keywordId: string): Promise<void
         updated_at = NOW()
   `;
 }
+
+// ─── Snapshot candidates (ranking simulator) ─────────────────────────────────
+
+export interface SnapshotCandidate {
+  snapshot_id: string;
+  keyword: string;
+  keyword_normalized: string;
+  score_recency: number;
+  score_frequency: number;
+  score_authority: number;
+  score_velocity: number;
+  score_internal: number;
+  total_score: number;
+  source_count: number;
+  top_source_title: string | null;
+  top_source_domain: string | null;
+  is_manual: boolean;
+}
+
+export async function insertSnapshotCandidates(
+  snapshotId: string,
+  candidates: Omit<SnapshotCandidate, "snapshot_id">[]
+): Promise<void> {
+  if (candidates.length === 0) return;
+
+  await Promise.all(
+    candidates.map((c) =>
+      sql`
+        INSERT INTO snapshot_candidates (
+          snapshot_id, keyword, keyword_normalized,
+          score_recency, score_frequency, score_authority, score_velocity, score_internal,
+          total_score, source_count, top_source_title, top_source_domain, is_manual
+        ) VALUES (
+          ${snapshotId}, ${c.keyword}, ${c.keyword_normalized},
+          ${c.score_recency}, ${c.score_frequency}, ${c.score_authority},
+          ${c.score_velocity}, ${c.score_internal},
+          ${c.total_score}, ${c.source_count},
+          ${c.top_source_title}, ${c.top_source_domain}, ${c.is_manual}
+        )
+        ON CONFLICT (snapshot_id, keyword_normalized) DO NOTHING
+      `
+    )
+  );
+}
+
+export async function getSnapshotCandidates(
+  snapshotId: string
+): Promise<SnapshotCandidate[]> {
+  return (await sql`
+    SELECT * FROM snapshot_candidates
+    WHERE snapshot_id = ${snapshotId}
+    ORDER BY total_score DESC
+  `) as SnapshotCandidate[];
+}
+
+// ─── Ranking weights (ranking simulator) ─────────────────────────────────────
+
+export interface RankingWeights {
+  w_recency: number;
+  w_frequency: number;
+  w_authority: number;
+  w_velocity: number;
+  w_internal: number;
+  updated_at: string;
+}
+
+export async function getRankingWeights(): Promise<RankingWeights> {
+  const rows = (await sql`
+    SELECT * FROM ranking_weights WHERE id = 1
+  `) as RankingWeights[];
+
+  if (rows[0]) return rows[0];
+
+  // 테이블이 비어있으면 기본값 INSERT 후 반환
+  await sql`INSERT INTO ranking_weights (id) VALUES (1) ON CONFLICT DO NOTHING`;
+  const fallback = (await sql`
+    SELECT * FROM ranking_weights WHERE id = 1
+  `) as RankingWeights[];
+  return fallback[0] ?? {
+    w_recency: 0.42,
+    w_frequency: 0.16,
+    w_authority: 0.10,
+    w_velocity: 0.32,
+    w_internal: 0.00,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export async function upsertRankingWeights(weights: {
+  w_recency: number;
+  w_frequency: number;
+  w_authority: number;
+  w_velocity: number;
+  w_internal: number;
+}): Promise<RankingWeights> {
+  const rows = (await sql`
+    INSERT INTO ranking_weights (id, w_recency, w_frequency, w_authority, w_velocity, w_internal, updated_at)
+    VALUES (1, ${weights.w_recency}, ${weights.w_frequency}, ${weights.w_authority}, ${weights.w_velocity}, ${weights.w_internal}, NOW())
+    ON CONFLICT (id) DO UPDATE
+    SET w_recency = EXCLUDED.w_recency,
+        w_frequency = EXCLUDED.w_frequency,
+        w_authority = EXCLUDED.w_authority,
+        w_velocity = EXCLUDED.w_velocity,
+        w_internal = EXCLUDED.w_internal,
+        updated_at = NOW()
+    RETURNING *
+  `) as RankingWeights[];
+
+  return rows[0];
+}

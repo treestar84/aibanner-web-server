@@ -233,3 +233,38 @@ CREATE TABLE IF NOT EXISTS source_ingestion_state (
   last_window_hours     INTEGER     NOT NULL DEFAULT 72,
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ============================================================
+-- snapshot_candidates: 스코어링 후보 전체 저장 (랭킹 시뮬레이터용)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS snapshot_candidates (
+  snapshot_id        TEXT    NOT NULL REFERENCES snapshots(snapshot_id) ON DELETE CASCADE,
+  keyword            TEXT    NOT NULL,
+  keyword_normalized TEXT    NOT NULL,
+  score_recency      REAL    DEFAULT 0,
+  score_frequency    REAL    DEFAULT 0,
+  score_authority    REAL    DEFAULT 0,
+  score_velocity     REAL    DEFAULT 0,
+  score_internal     REAL    DEFAULT 0,
+  total_score        REAL    DEFAULT 0,
+  source_count       INTEGER DEFAULT 0,
+  top_source_title   TEXT,
+  top_source_domain  TEXT,
+  is_manual          BOOLEAN DEFAULT FALSE,
+  PRIMARY KEY (snapshot_id, keyword_normalized)
+);
+
+-- ============================================================
+-- ranking_weights: 관리자 가중치 설정 (단일 행)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ranking_weights (
+  id          INTEGER     PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  w_recency   REAL        NOT NULL DEFAULT 0.42,
+  w_frequency REAL        NOT NULL DEFAULT 0.16,
+  w_authority REAL        NOT NULL DEFAULT 0.10,
+  w_velocity  REAL        NOT NULL DEFAULT 0.32,
+  w_internal  REAL        NOT NULL DEFAULT 0.00,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO ranking_weights (id) VALUES (1) ON CONFLICT DO NOTHING;

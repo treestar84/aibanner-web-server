@@ -243,6 +243,12 @@ export default function AdminPage() {
             <p className="text-sm text-zinc-400 mt-2">
               등록된 수동 키워드는 파이프라인에서 강제 포함되어 상단 노출 우선순위를 갖습니다.
             </p>
+            <a
+              href="/admin/ranking-simulator"
+              className="inline-block mt-2 text-sm text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
+            >
+              랭킹 시뮬레이터 &rarr;
+            </a>
           </div>
           <div className="text-sm text-zinc-300 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2">
             활성 {activeCount}개 / 전체 {items.length}개

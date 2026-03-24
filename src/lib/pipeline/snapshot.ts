@@ -34,6 +34,8 @@ import {
   getSourceIngestionStates,
   upsertSourceIngestionState,
   getActiveManualKeywords,
+  insertSnapshotCandidates,
+  getRankingWeights,
 } from "@/lib/db/queries";
 import type { Source, SourceIngestionState, ManualKeyword } from "@/lib/db/queries";
 
@@ -177,8 +179,31 @@ function resolveSourceWindowProfile(): SourceWindowProfile {
   };
 }
 
-function resolveRuntimeProfile(mode: PipelineMode): PipelineRuntimeProfile {
+const DEFAULT_SCORING_WEIGHTS = {
+  recency: 0.42,
+  frequency: 0.16,
+  authority: 0.10,
+  velocity: 0.32,
+  internal: 0,
+};
+
+async function resolveRuntimeProfile(mode: PipelineMode): Promise<PipelineRuntimeProfile> {
   const scheduleUtc = resolveScheduleUtc(mode);
+
+  // DB에서 관리자 설정 가중치 조회, 실패 시 기본값 사용
+  let weights = DEFAULT_SCORING_WEIGHTS;
+  try {
+    const dbWeights = await getRankingWeights();
+    weights = {
+      recency: dbWeights.w_recency,
+      frequency: dbWeights.w_frequency,
+      authority: dbWeights.w_authority,
+      velocity: dbWeights.w_velocity,
+      internal: dbWeights.w_internal,
+    };
+  } catch (err) {
+    console.warn(`[snapshot] Failed to load ranking weights from DB, using defaults: ${(err as Error).message}`);
+  }
 
   const scoring: ScoringProfile = {
     recencyHalfLifeHours: parsePositiveFloatEnv(
@@ -199,13 +224,7 @@ function resolveRuntimeProfile(mode: PipelineMode): PipelineRuntimeProfile {
       1,
       96
     ),
-    weights: {
-      recency: 0.42,
-      frequency: 0.16,
-      authority: 0.10,
-      velocity: 0.32,
-      internal: 0,
-    },
+    weights,
   };
 
   const detailedKeywordLimit = parsePositiveIntEnv(
@@ -831,7 +850,7 @@ export async function runSnapshotPipeline(
   mode: PipelineMode;
 }> {
   const mode: PipelineMode = "realtime";
-  const profile = resolveRuntimeProfile(mode);
+  const profile = await resolveRuntimeProfile(mode);
   const startedAt = Date.now();
   console.log(`[snapshot] Pipeline started (mode=${mode})`);
   console.log(
@@ -943,6 +962,33 @@ export async function runSnapshotPipeline(
     throw new Error(
       "[snapshot] No ranked keywords generated; aborting snapshot write to avoid empty snapshot."
     );
+  }
+
+  // 6.5) 시뮬레이터용 후보 전체 저장
+  try {
+    const manualKeywordKeySet = new Set<string>(
+      activeManualKeywords.map((row) => normalizeManualKeywordLookupKey(row.keyword))
+    );
+    await insertSnapshotCandidates(
+      snapshotId,
+      finalRanked.map((item) => ({
+        keyword: item.keyword.keyword,
+        keyword_normalized: item.keyword.keywordId,
+        score_recency: item.score.recency,
+        score_frequency: item.score.frequency,
+        score_authority: item.score.authority,
+        score_velocity: item.score.velocity,
+        score_internal: item.score.internal,
+        total_score: item.score.total,
+        source_count: item.keyword.candidates.domains.size,
+        top_source_title: null,
+        top_source_domain: [...item.keyword.candidates.domains][0] ?? null,
+        is_manual: keywordLookupKeys(item).some((key) => manualKeywordKeySet.has(key)),
+      }))
+    );
+    console.log(`[snapshot] Saved ${finalRanked.length} candidates for ranking simulator`);
+  } catch (err) {
+    console.warn(`[snapshot] Failed to save candidates: ${(err as Error).message}`);
   }
 
   // 7) 스냅샷 저장
