@@ -59,12 +59,12 @@ test("buildManualKeywordFeedback marks snapshot failures as warning", () => {
     action: "disable",
     item: {
       keyword: "Openclaw",
-      mode: "briefing",
+      mode: "realtime",
       expires_at: "2026-03-15T06:00:00.000Z",
     },
     snapshot: {
       ok: false,
-      mode: "briefing",
+      mode: "realtime",
       error: "snapshot failed",
     },
   });

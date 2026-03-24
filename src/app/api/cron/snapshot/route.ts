@@ -22,9 +22,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const mode = parsePipelineMode(req.nextUrl.searchParams.get("mode"), "briefing");
-    const runRetention =
-      req.nextUrl.searchParams.get("retention") === "1" || mode === "briefing";
+    const mode = parsePipelineMode(req.nextUrl.searchParams.get("mode"));
+    const runRetention = req.nextUrl.searchParams.get("retention") === "1";
     const startedAt = Date.now();
     const result = await runSnapshotPipeline({ mode });
     let retention: RetentionRunResult | null = null;

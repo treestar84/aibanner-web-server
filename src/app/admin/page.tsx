@@ -7,7 +7,7 @@ import {
   type ManualKeywordOnDemandSnapshot,
 } from "@/lib/manual-keyword-feedback";
 
-type PipelineMode = "realtime" | "briefing";
+type PipelineMode = "realtime";
 
 interface ManualKeywordItem {
   id: number;
@@ -267,7 +267,6 @@ export default function AdminPage() {
               className="rounded-lg bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-400"
             >
               <option value="realtime">realtime</option>
-              <option value="briefing">briefing</option>
             </select>
             <select
               value={ttlHours}
@@ -319,17 +318,6 @@ export default function AdminPage() {
             }`}
           >
             realtime
-          </button>
-          <button
-            type="button"
-            onClick={() => setModeFilter("briefing")}
-            className={`rounded-lg px-3 py-1.5 text-sm border ${
-              modeFilter === "briefing"
-                ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-100"
-                : "bg-zinc-900 border-zinc-700 text-zinc-300"
-            }`}
-          >
-            briefing
           </button>
           <button
             type="button"

@@ -7,13 +7,10 @@ export interface ScheduleSlot {
 
 const MINUTES_PER_DAY = 24 * 60;
 const KST_OFFSET_MINUTES = 9 * 60;
-const DEFAULT_BRIEFING_SCHEDULE_UTC = "0:17,9:17";
-const DEFAULT_REALTIME_SCHEDULE_UTC = "2:0,8:0,14:0,20:0";
+const DEFAULT_SCHEDULE_UTC = "2:0,8:0,14:0,20:0";
 
-export function defaultScheduleUtcForMode(mode: PipelineMode): string {
-  return mode === "realtime"
-    ? DEFAULT_REALTIME_SCHEDULE_UTC
-    : DEFAULT_BRIEFING_SCHEDULE_UTC;
+export function defaultScheduleUtcForMode(_mode?: PipelineMode): string {
+  return DEFAULT_SCHEDULE_UTC;
 }
 
 export function parseScheduleUtc(
@@ -55,15 +52,11 @@ export function parseScheduleUtc(
   });
 }
 
-export function resolveScheduleUtc(mode: PipelineMode): ScheduleSlot[] {
-  const fallbackRaw = defaultScheduleUtcForMode(mode);
-  const configuredValue =
-    mode === "realtime"
-      ? process.env.PIPELINE_REALTIME_SCHEDULE_UTC
-      : process.env.PIPELINE_BRIEFING_SCHEDULE_UTC ??
-        process.env.PIPELINE_SCHEDULE_UTC;
-
-  return parseScheduleUtc(configuredValue, fallbackRaw);
+export function resolveScheduleUtc(_mode?: PipelineMode): ScheduleSlot[] {
+  return parseScheduleUtc(
+    process.env.PIPELINE_REALTIME_SCHEDULE_UTC,
+    DEFAULT_SCHEDULE_UTC
+  );
 }
 
 export function scheduleUtcToKstStrings(scheduleUtc: ScheduleSlot[]): string[] {
@@ -83,6 +76,6 @@ export function scheduleUtcToKstStrings(scheduleUtc: ScheduleSlot[]): string[] {
   });
 }
 
-export function scheduleKstForMode(mode: PipelineMode): string[] {
+export function scheduleKstForMode(mode?: PipelineMode): string[] {
   return scheduleUtcToKstStrings(resolveScheduleUtc(mode));
 }

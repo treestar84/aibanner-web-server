@@ -6,7 +6,7 @@
 -- ============================================================
 CREATE TABLE IF NOT EXISTS snapshots (
   snapshot_id        TEXT        PRIMARY KEY,               -- e.g. "20260222_0900_KST"
-  pipeline_mode      TEXT        NOT NULL DEFAULT 'briefing', -- realtime|briefing
+  pipeline_mode      TEXT        NOT NULL DEFAULT 'realtime',
   updated_at_utc     TIMESTAMPTZ NOT NULL,
   next_update_at_utc TIMESTAMPTZ NOT NULL,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -129,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_keyword_daily_stats_keyword_date
 -- ============================================================
 -- Backfill / additive columns for existing databases
 -- ============================================================
-ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS pipeline_mode TEXT NOT NULL DEFAULT 'briefing';
+ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS pipeline_mode TEXT NOT NULL DEFAULT 'realtime';
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS keyword_ko TEXT NOT NULL DEFAULT '';
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS keyword_en TEXT NOT NULL DEFAULT '';
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS summary_short_en TEXT NOT NULL DEFAULT '';
@@ -181,7 +181,7 @@ CREATE INDEX IF NOT EXISTS idx_keyword_view_counts_last_viewed_at
 CREATE TABLE IF NOT EXISTS manual_keywords (
   id           SERIAL      PRIMARY KEY,
   keyword      TEXT        NOT NULL,
-  mode         TEXT        NOT NULL DEFAULT 'realtime', -- realtime|briefing
+  mode         TEXT        NOT NULL DEFAULT 'realtime',
   ttl_hours    INTEGER     NOT NULL DEFAULT 6,
   enabled      BOOLEAN     NOT NULL DEFAULT TRUE,
   starts_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),

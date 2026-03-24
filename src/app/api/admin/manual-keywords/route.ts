@@ -8,26 +8,15 @@ export const runtime = "nodejs";
 export const revalidate = 0;
 export const maxDuration = 300;
 
-function parseOptionalModeParam(value: string | null): {
+function parseOptionalModeParam(_value: string | null): {
   mode?: PipelineMode;
   error?: string;
 } {
-  const normalized = (value ?? "").trim().toLowerCase();
-  if (!normalized) return {};
-  if (normalized === "realtime" || normalized === "briefing") {
-    return { mode: normalized };
-  }
-  return { error: "mode must be one of: realtime, briefing" };
+  return { mode: "realtime" };
 }
 
-function parseModeFromBody(value: unknown): { mode?: PipelineMode; error?: string } {
-  if (value === undefined || value === null || value === "") {
-    return {};
-  }
-  if (value === "realtime" || value === "briefing") {
-    return { mode: value };
-  }
-  return { error: "mode must be one of: realtime, briefing" };
+function parseModeFromBody(_value: unknown): { mode?: PipelineMode; error?: string } {
+  return { mode: "realtime" };
 }
 
 export async function GET(req: NextRequest) {

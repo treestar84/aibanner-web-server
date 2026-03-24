@@ -1171,10 +1171,8 @@ function mergeNormalizedKeywordsById(items: NormalizedKeyword[]): NormalizedKeyw
 
 export async function normalizeKeywords(
   items: RssItem[],
-  options: { mode?: PipelineMode } = {}
+  _options: { mode?: PipelineMode } = {}
 ): Promise<NormalizedKeyword[]> {
-  const mode = options.mode ?? "briefing";
-  const isRealtimeMode = mode === "realtime";
   // 1. 제목 배치 준비
   const batches = prepareTitleBatches(items);
   console.log(
@@ -1218,11 +1216,9 @@ export async function normalizeKeywords(
       console.log(`[keywords] DROP(no_match)       : "${kw.keyword}"`);
       continue;
     }
-    // briefing: 단일 소스 키워드 제거(품질 우선)
-    // realtime: 단일 소스 허용 폭을 넓혀 자동 키워드 소실을 방지
-    const shouldDropSingleDomain = isRealtimeMode
-      ? candidate.tier === "COMMUNITY" && candidate.count < 2
-      : candidate.tier !== "P0_CURATED" && candidate.domains.size < 2;
+    // 단일 소스 허용 폭을 넓혀 자동 키워드 소실을 방지
+    const shouldDropSingleDomain =
+      candidate.tier === "COMMUNITY" && candidate.count < 2;
     if (shouldDropSingleDomain) {
       console.log(`[keywords] DROP(single_domain)  : "${kw.keyword}" (domains=${candidate.domains.size})`);
       continue;

@@ -27,7 +27,7 @@ export async function GET(
     const lang = url.searchParams.get("lang") === "en" ? "en" : "ko";
 
     let snapshotId: string;
-    let snapshotMode: "realtime" | "briefing";
+    let snapshotMode: "realtime";
     if (snapshotIdParam) {
       const snap = await getSnapshotById(snapshotIdParam);
       if (!snap) {

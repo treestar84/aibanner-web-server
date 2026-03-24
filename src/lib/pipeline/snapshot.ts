@@ -67,17 +67,6 @@ function parsePositiveFloatEnv(
   return parsed;
 }
 
-function parseBooleanEnv(value: string | undefined, fallback: boolean): boolean {
-  if (value === undefined) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "1" || normalized === "true" || normalized === "yes") {
-    return true;
-  }
-  if (normalized === "0" || normalized === "false" || normalized === "no") {
-    return false;
-  }
-  return fallback;
-}
 
 const DETAILED_KEYWORD_LIMIT = parsePositiveIntEnv(
   process.env.PIPELINE_DETAILED_KEYWORDS,
@@ -147,43 +136,32 @@ const SOURCE_PLANS: SourcePlan[] = [
   { key: "changelog", collect: (windowHours) => collectChangelogItems(windowHours) },
 ];
 
-function resolveSourceWindowProfile(mode: PipelineMode): SourceWindowProfile {
+function resolveSourceWindowProfile(): SourceWindowProfile {
   const legacyMin = process.env.PIPELINE_SOURCE_MIN_WINDOW_HOURS;
   const legacyFallback = process.env.PIPELINE_SOURCE_FALLBACK_WINDOW_HOURS;
   const legacyMax = process.env.PIPELINE_SOURCE_MAX_WINDOW_HOURS;
   const legacyOverlap = process.env.PIPELINE_SOURCE_OVERLAP_MINUTES;
 
-  const isRealtime = mode === "realtime";
   const minHours = parsePositiveIntEnv(
-    isRealtime
-      ? process.env.PIPELINE_REALTIME_SOURCE_MIN_WINDOW_HOURS ?? legacyMin
-      : process.env.PIPELINE_BRIEFING_SOURCE_MIN_WINDOW_HOURS ?? legacyMin,
-    isRealtime ? 6 : 24,
+    process.env.PIPELINE_REALTIME_SOURCE_MIN_WINDOW_HOURS ?? legacyMin,
+    6,
     1,
     168
   );
   const maxHours = parsePositiveIntEnv(
-    isRealtime
-      ? process.env.PIPELINE_REALTIME_SOURCE_MAX_WINDOW_HOURS ?? legacyMax
-      : process.env.PIPELINE_BRIEFING_SOURCE_MAX_WINDOW_HOURS ?? legacyMax,
-    isRealtime ? 96 : 168,
+    process.env.PIPELINE_REALTIME_SOURCE_MAX_WINDOW_HOURS ?? legacyMax,
+    96,
     6,
     720
   );
   const fallbackHours = parsePositiveIntEnv(
-    isRealtime
-      ? process.env.PIPELINE_REALTIME_SOURCE_FALLBACK_WINDOW_HOURS ??
-          legacyFallback
-      : process.env.PIPELINE_BRIEFING_SOURCE_FALLBACK_WINDOW_HOURS ??
-          legacyFallback,
-    isRealtime ? 24 : 72,
+    process.env.PIPELINE_REALTIME_SOURCE_FALLBACK_WINDOW_HOURS ?? legacyFallback,
+    24,
     1,
     720
   );
   const overlapMinutes = parsePositiveIntEnv(
-    isRealtime
-      ? process.env.PIPELINE_REALTIME_SOURCE_OVERLAP_MINUTES ?? legacyOverlap
-      : process.env.PIPELINE_BRIEFING_SOURCE_OVERLAP_MINUTES ?? legacyOverlap,
+    process.env.PIPELINE_REALTIME_SOURCE_OVERLAP_MINUTES ?? legacyOverlap,
     45,
     5,
     360
@@ -200,71 +178,49 @@ function resolveSourceWindowProfile(mode: PipelineMode): SourceWindowProfile {
 }
 
 function resolveRuntimeProfile(mode: PipelineMode): PipelineRuntimeProfile {
-  const isRealtime = mode === "realtime";
   const scheduleUtc = resolveScheduleUtc(mode);
 
   const scoring: ScoringProfile = {
     recencyHalfLifeHours: parsePositiveFloatEnv(
-      isRealtime
-        ? process.env.PIPELINE_REALTIME_RECENCY_HALFLIFE_HOURS
-        : process.env.PIPELINE_BRIEFING_RECENCY_HALFLIFE_HOURS,
-      isRealtime ? 9 : 36,
+      process.env.PIPELINE_REALTIME_RECENCY_HALFLIFE_HOURS,
+      9,
       1,
       168
     ),
     velocityRecentWindowHours: parsePositiveFloatEnv(
-      isRealtime
-        ? process.env.PIPELINE_REALTIME_VELOCITY_RECENT_HOURS
-        : process.env.PIPELINE_BRIEFING_VELOCITY_RECENT_HOURS,
+      process.env.PIPELINE_REALTIME_VELOCITY_RECENT_HOURS,
       6,
       1,
       24
     ),
     velocityBaselineWindowHours: parsePositiveFloatEnv(
-      isRealtime
-        ? process.env.PIPELINE_REALTIME_VELOCITY_BASELINE_HOURS
-        : process.env.PIPELINE_BRIEFING_VELOCITY_BASELINE_HOURS,
+      process.env.PIPELINE_REALTIME_VELOCITY_BASELINE_HOURS,
       18,
       1,
       96
     ),
-    weights: isRealtime
-      ? {
-          recency: 0.42,
-          frequency: 0.16,
-          authority: 0.10,
-          velocity: 0.32,
-          internal: 0,
-        }
-      : {
-          recency: 0.52,
-          frequency: 0.20,
-          authority: 0.20,
-          velocity: 0.08,
-          internal: 0,
-        },
+    weights: {
+      recency: 0.42,
+      frequency: 0.16,
+      authority: 0.10,
+      velocity: 0.32,
+      internal: 0,
+    },
   };
 
   const detailedKeywordLimit = parsePositiveIntEnv(
-    isRealtime
-      ? process.env.PIPELINE_REALTIME_DETAILED_KEYWORDS
-      : process.env.PIPELINE_BRIEFING_DETAILED_KEYWORDS,
+    process.env.PIPELINE_REALTIME_DETAILED_KEYWORDS,
     DETAILED_KEYWORD_LIMIT,
     1,
     RANKING_CANDIDATE_LIMIT
   );
 
-  const allowExternalEnrichmentForNewKeywords = isRealtime
-    // Realtime 결과에서 summary/source 공백 회귀를 막기 위해 항상 신규 enrichment를 허용한다.
-    ? true
-    : parseBooleanEnv(process.env.PIPELINE_BRIEFING_EXTERNAL_ENRICHMENT, true);
-
   return {
     mode,
     scoring,
     scheduleUtc,
-    sourceWindow: resolveSourceWindowProfile(mode),
-    allowExternalEnrichmentForNewKeywords,
+    sourceWindow: resolveSourceWindowProfile(),
+    allowExternalEnrichmentForNewKeywords: true,
     detailedKeywordLimit,
   };
 }
@@ -867,14 +823,14 @@ interface RunSnapshotPipelineOptions {
 }
 
 export async function runSnapshotPipeline(
-  options: RunSnapshotPipelineOptions = {}
+  _options: RunSnapshotPipelineOptions = {}
 ): Promise<{
   snapshotId: string;
   keywordCount: number;
   reusedCount: number;
   mode: PipelineMode;
 }> {
-  const mode = options.mode ?? "briefing";
+  const mode: PipelineMode = "realtime";
   const profile = resolveRuntimeProfile(mode);
   const startedAt = Date.now();
   console.log(`[snapshot] Pipeline started (mode=${mode})`);

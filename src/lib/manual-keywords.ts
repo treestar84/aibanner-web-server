@@ -62,7 +62,7 @@ export function buildManualKeywordId(mode: PipelineMode, keyword: string): strin
 }
 
 export function isManualKeywordId(keywordId: string): boolean {
-  return /^manual_(realtime|briefing)_[a-z0-9]+$/i.test(keywordId.trim());
+  return /^manual_realtime_[a-z0-9]+$/i.test(keywordId.trim());
 }
 
 export function filterActiveSnapshotKeywords<T extends { keyword_id: string }>(
