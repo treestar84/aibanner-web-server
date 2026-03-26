@@ -136,6 +136,9 @@ ALTER TABLE keywords ADD COLUMN IF NOT EXISTS summary_short_en TEXT NOT NULL DEF
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS top_source_title_ko TEXT;
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS top_source_title_en TEXT;
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS score_velocity FLOAT NOT NULL DEFAULT 0;
+ALTER TABLE keywords ADD COLUMN IF NOT EXISTS score_engagement FLOAT NOT NULL DEFAULT 0;
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS score_engagement REAL DEFAULT 0;
+ALTER TABLE ranking_weights ADD COLUMN IF NOT EXISTS w_engagement REAL NOT NULL DEFAULT 0.22;
 
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS title_ko TEXT;
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS title_en TEXT;
@@ -245,6 +248,7 @@ CREATE TABLE IF NOT EXISTS snapshot_candidates (
   score_frequency    REAL    DEFAULT 0,
   score_authority    REAL    DEFAULT 0,
   score_velocity     REAL    DEFAULT 0,
+  score_engagement   REAL    DEFAULT 0,
   score_internal     REAL    DEFAULT 0,
   total_score        REAL    DEFAULT 0,
   source_count       INTEGER DEFAULT 0,
@@ -262,7 +266,8 @@ CREATE TABLE IF NOT EXISTS ranking_weights (
   w_recency   REAL        NOT NULL DEFAULT 0.42,
   w_frequency REAL        NOT NULL DEFAULT 0.16,
   w_authority REAL        NOT NULL DEFAULT 0.10,
-  w_velocity  REAL        NOT NULL DEFAULT 0.32,
+  w_velocity  REAL        NOT NULL DEFAULT 0.30,
+  w_engagement REAL       NOT NULL DEFAULT 0.22,
   w_internal  REAL        NOT NULL DEFAULT 0.00,
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );

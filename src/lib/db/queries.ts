@@ -32,6 +32,7 @@ export interface Keyword {
   score_frequency: number;
   score_authority: number;
   score_velocity: number;
+  score_engagement: number;
   score_internal: number;
   summary_short: string;
   summary_short_en: string;
@@ -654,7 +655,7 @@ export async function insertKeyword(keyword: Omit<Keyword, "created_at">): Promi
   await sql`
     INSERT INTO keywords (
       snapshot_id, keyword_id, keyword, keyword_ko, keyword_en, rank, delta_rank, is_new,
-      score, score_recency, score_frequency, score_authority, score_velocity, score_internal,
+      score, score_recency, score_frequency, score_authority, score_velocity, score_engagement, score_internal,
       summary_short, summary_short_en, primary_type,
       top_source_title, top_source_title_ko, top_source_title_en,
       top_source_url, top_source_domain, top_source_image_url
@@ -663,7 +664,7 @@ export async function insertKeyword(keyword: Omit<Keyword, "created_at">): Promi
       ${keyword.keyword_ko}, ${keyword.keyword_en},
       ${keyword.rank}, ${keyword.delta_rank}, ${keyword.is_new},
       ${keyword.score}, ${keyword.score_recency}, ${keyword.score_frequency},
-      ${keyword.score_authority}, ${keyword.score_velocity}, ${keyword.score_internal},
+      ${keyword.score_authority}, ${keyword.score_velocity}, ${keyword.score_engagement}, ${keyword.score_internal},
       ${keyword.summary_short}, ${keyword.summary_short_en}, ${keyword.primary_type},
       ${keyword.top_source_title}, ${keyword.top_source_title_ko}, ${keyword.top_source_title_en},
       ${keyword.top_source_url},
@@ -735,6 +736,38 @@ export async function getPreviousRanks(
     }
   }
   return map;
+}
+
+/** 최근 N개 스냅샷에서 각 keywordId의 rank를 조회 (cross-snapshot trending용) */
+export async function getRankHistory(
+  snapshotIds: string[],
+  keywordIds: string[]
+): Promise<Map<string, number[]>> {
+  if (snapshotIds.length === 0 || keywordIds.length === 0) return new Map();
+
+  const rows = (await sql`
+    SELECT k.keyword_id, k.snapshot_id, k.rank
+    FROM keywords k
+    WHERE k.keyword_id = ANY(${keywordIds})
+      AND k.snapshot_id = ANY(${snapshotIds})
+    ORDER BY k.created_at DESC
+  `) as { keyword_id: string; snapshot_id: string; rank: number }[];
+
+  const result = new Map<string, number[]>();
+
+  for (const row of rows) {
+    if (!result.has(row.keyword_id)) {
+      result.set(row.keyword_id, []);
+    }
+    result.get(row.keyword_id)!.push(row.rank);
+  }
+
+  // 각 키워드의 rank를 스냅샷 시간순 정렬 (최신 먼저)
+  for (const [, ranks] of result) {
+    ranks.sort((a, b) => a - b); // 이미 ORDER BY DESC로 가져왔으므로 그대로
+  }
+
+  return result;
 }
 
 // ─── Source queries ───────────────────────────────────────────────────────────
@@ -1010,6 +1043,7 @@ export interface SnapshotCandidate {
   score_frequency: number;
   score_authority: number;
   score_velocity: number;
+  score_engagement: number;
   score_internal: number;
   total_score: number;
   source_count: number;
@@ -1029,12 +1063,12 @@ export async function insertSnapshotCandidates(
       sql`
         INSERT INTO snapshot_candidates (
           snapshot_id, keyword, keyword_normalized,
-          score_recency, score_frequency, score_authority, score_velocity, score_internal,
+          score_recency, score_frequency, score_authority, score_velocity, score_engagement, score_internal,
           total_score, source_count, top_source_title, top_source_domain, is_manual
         ) VALUES (
           ${snapshotId}, ${c.keyword}, ${c.keyword_normalized},
           ${c.score_recency}, ${c.score_frequency}, ${c.score_authority},
-          ${c.score_velocity}, ${c.score_internal},
+          ${c.score_velocity}, ${c.score_engagement}, ${c.score_internal},
           ${c.total_score}, ${c.source_count},
           ${c.top_source_title}, ${c.top_source_domain}, ${c.is_manual}
         )
@@ -1061,6 +1095,7 @@ export interface RankingWeights {
   w_frequency: number;
   w_authority: number;
   w_velocity: number;
+  w_engagement?: number;
   w_internal: number;
   updated_at: string;
 }
@@ -1078,10 +1113,11 @@ export async function getRankingWeights(): Promise<RankingWeights> {
     SELECT * FROM ranking_weights WHERE id = 1
   `) as RankingWeights[];
   return fallback[0] ?? {
-    w_recency: 0.42,
-    w_frequency: 0.16,
-    w_authority: 0.10,
-    w_velocity: 0.32,
+    w_recency: 0.28,
+    w_frequency: 0.12,
+    w_authority: 0.08,
+    w_velocity: 0.30,
+    w_engagement: 0.22,
     w_internal: 0.00,
     updated_at: new Date().toISOString(),
   };

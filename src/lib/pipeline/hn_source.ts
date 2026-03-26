@@ -8,6 +8,8 @@ interface HnHit {
   title: string;
   url?: string;
   created_at_i: number;
+  points?: number;
+  num_comments?: number;
 }
 
 interface HnResponse {
@@ -37,6 +39,10 @@ export async function collectHnItems(windowHours = 72): Promise<RssItem[]> {
         feedTitle: "HackerNews",
         tier: "COMMUNITY" as const,
         lang: "en",
+        engagement:
+          h.points != null || h.num_comments != null
+            ? { score: h.points ?? 0, comments: h.num_comments ?? 0 }
+            : undefined,
       }));
   } catch (err) {
     console.warn("[hn_source] Failed:", (err as Error).message);

@@ -16,6 +16,11 @@ export interface RssRankingSignal {
   rank?: number | null;
 }
 
+export interface RssEngagement {
+  score: number;      // upvotes, points, stars
+  comments: number;   // comment count
+}
+
 export interface RssItem {
   title: string;
   link: string;
@@ -26,6 +31,7 @@ export interface RssItem {
   tier: RssFeedConfig["tier"];
   lang: string;
   rankingSignals?: RssRankingSignal[];
+  engagement?: RssEngagement;
 }
 
 // ─── RSS Feed list (AI-focused) ───────────────────────────────────────────────
@@ -70,16 +76,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { url: "https://www.etnews.com/rss/section.xml?id=150", title: "전자신문 AI", tier: "P2_RAW", lang: "ko" },
   { url: "https://zdnet.co.kr/rss/news.xml", title: "ZDNet Korea", tier: "P2_RAW", lang: "ko" },
 
-  // ── COMMUNITY: Reddit, HN, Dev.to ─────────────────────────────────────────
-  { url: "https://www.reddit.com/r/MachineLearning/.rss", title: "r/MachineLearning", tier: "COMMUNITY", lang: "en" },
-  { url: "https://www.reddit.com/r/artificial/.rss", title: "r/artificial", tier: "COMMUNITY", lang: "en" },
-  { url: "https://www.reddit.com/r/LocalLLaMA/.rss", title: "r/LocalLLaMA", tier: "COMMUNITY", lang: "en" },
-  { url: "https://www.reddit.com/r/vibecoding/.rss", title: "r/vibecoding", tier: "COMMUNITY", lang: "en" },
-  { url: "https://www.reddit.com/r/PromptEngineering/.rss", title: "r/PromptEngineering", tier: "COMMUNITY", lang: "en" },
-  { url: "https://www.reddit.com/r/cursor/.rss", title: "r/cursor", tier: "COMMUNITY", lang: "en" },
-  { url: "https://www.reddit.com/r/ClaudeAI/.rss", title: "r/ClaudeAI", tier: "COMMUNITY", lang: "en" },
-  { url: "https://www.reddit.com/r/ChatGPTCoding/.rss", title: "r/ChatGPTCoding", tier: "COMMUNITY", lang: "en" },
-  { url: "https://www.reddit.com/r/ollama/.rss", title: "r/ollama", tier: "COMMUNITY", lang: "en" },
+  // ── COMMUNITY: Dev.to, HN (Reddit은 reddit_source.ts에서 JSON API로 수집) ──
   { url: "https://dev.to/feed/tag/ai", title: "Dev.to AI", tier: "COMMUNITY", lang: "en" },
   { url: "https://hnrss.org/newest?q=LLM+AI", title: "HackerNews AI", tier: "COMMUNITY", lang: "en" },
 ];

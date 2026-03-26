@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
               frequency: kw.score_frequency,
               authority: kw.score_authority,
               velocity: kw.score_velocity,
+              engagement: kw.score_engagement ?? 0,
               internal: kw.score_internal,
             },
             summaryShort: lang === "en" ? kw.summary_short_en || kw.summary_short : kw.summary_short,

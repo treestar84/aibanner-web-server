@@ -7,6 +7,7 @@ import { collectYoutubeItems } from "./youtube_source";
 import { collectGithubReleaseItems } from "./github_releases_source";
 import { collectChangelogItems } from "./changelog_source";
 import { collectProductHuntTopItems } from "./product_hunt_top_source";
+import { collectRedditItems } from "./reddit_source";
 import type { RssItem } from "./rss";
 import { normalizeKeywords } from "./keywords";
 import { rankKeywords, calculateDeltaRanks } from "./scoring";
@@ -36,6 +37,7 @@ import {
   getActiveManualKeywords,
   insertSnapshotCandidates,
   getRankingWeights,
+  getRankHistory,
 } from "@/lib/db/queries";
 import type { Source, SourceIngestionState, ManualKeyword } from "@/lib/db/queries";
 
@@ -136,6 +138,7 @@ const SOURCE_PLANS: SourcePlan[] = [
   { key: "youtube", collect: (windowHours) => collectYoutubeItems(windowHours) },
   { key: "github_releases", collect: (windowHours) => collectGithubReleaseItems(windowHours) },
   { key: "changelog", collect: (windowHours) => collectChangelogItems(windowHours) },
+  { key: "reddit", collect: (windowHours) => collectRedditItems(windowHours) },
 ];
 
 function resolveSourceWindowProfile(): SourceWindowProfile {
@@ -180,10 +183,11 @@ function resolveSourceWindowProfile(): SourceWindowProfile {
 }
 
 const DEFAULT_SCORING_WEIGHTS = {
-  recency: 0.35,
-  frequency: 0.16,
-  authority: 0.10,
-  velocity: 0.39,
+  recency: 0.28,
+  frequency: 0.12,
+  authority: 0.08,
+  velocity: 0.30,
+  engagement: 0.22,
   internal: 0,
 };
 
@@ -199,6 +203,7 @@ async function resolveRuntimeProfile(mode: PipelineMode): Promise<PipelineRuntim
       frequency: dbWeights.w_frequency,
       authority: dbWeights.w_authority,
       velocity: dbWeights.w_velocity,
+      engagement: dbWeights.w_engagement ?? DEFAULT_SCORING_WEIGHTS.engagement,
       internal: dbWeights.w_internal,
     };
   } catch (err) {
@@ -536,6 +541,7 @@ function createManualRankedItem(
       frequency: 1,
       authority: 1,
       velocity: 1,
+      engagement: 1,
       internal: MANUAL_KEYWORD_INTERNAL_BONUS,
       total: parseFloat((10 + MANUAL_KEYWORD_TOTAL_BONUS).toFixed(4)),
     },
@@ -659,6 +665,7 @@ async function processKeyword(
       score_frequency: item.score.frequency,
       score_authority: item.score.authority,
       score_velocity: item.score.velocity,
+      score_engagement: item.score.engagement,
       score_internal: item.score.internal,
       summary_short: cached.keyword.summary_short,
       summary_short_en: cached.keyword.summary_short_en,
@@ -724,6 +731,7 @@ async function processKeyword(
       score_frequency: item.score.frequency,
       score_authority: item.score.authority,
       score_velocity: item.score.velocity,
+      score_engagement: item.score.engagement,
       score_internal: item.score.internal,
       summary_short: "",
       summary_short_en: "",
@@ -796,6 +804,7 @@ async function processKeyword(
     score_frequency: item.score.frequency,
     score_authority: item.score.authority,
     score_velocity: item.score.velocity,
+    score_engagement: item.score.engagement,
     score_internal: item.score.internal,
     summary_short: summaries.ko,
     summary_short_en: summaries.en,
@@ -879,6 +888,7 @@ export async function runSnapshotPipeline(
     youtubeItems,
     githubReleaseItems,
     changelogItems,
+    redditItems,
   ] = await Promise.all(
     SOURCE_PLANS.map((plan) =>
       collectWithIncrementalWindow(profile, plan, sourceStateMap)
@@ -897,13 +907,14 @@ export async function runSnapshotPipeline(
     ...hnItems,
     ...gdeltItems,
     ...githubItems,
+    ...redditItems,
   ].filter((item) => {
     if (seenUrls.has(item.link)) return false;
     seenUrls.add(item.link);
     return true;
   });
   console.log(
-    `[snapshot] Got ${allItems.length} items (productHuntTop=${productHuntTopItems.length}, rss=${rssItems.length}, githubMd=${githubMdItems.length}, githubRel=${githubReleaseItems.length}, changelog=${changelogItems.length}, youtube=${youtubeItems.length}, hn=${hnItems.length}, gdelt=${gdeltItems.length}, github=${githubItems.length})`
+    `[snapshot] Got ${allItems.length} items (productHuntTop=${productHuntTopItems.length}, rss=${rssItems.length}, githubMd=${githubMdItems.length}, githubRel=${githubReleaseItems.length}, changelog=${changelogItems.length}, youtube=${youtubeItems.length}, hn=${hnItems.length}, gdelt=${gdeltItems.length}, github=${githubItems.length}, reddit=${redditItems.length})`
   );
 
   // 2~3) 키워드 추출 + 정규화 (AI 클러스터링)
@@ -950,9 +961,42 @@ export async function runSnapshotPipeline(
     )
     .sort((a, b) => b.score.total - a.score.total);
 
+  // Cross-snapshot momentum: 최근 3 스냅샷에서 연속 상승 시 보너스, 연속 하락 시 페널티
+  const MOMENTUM_BONUS = 0.08;
+  let rankedWithMomentum = rankedWithNovelty;
+  if (recentSnapshots.length >= 2) {
+    const historySnapshotIds = recentSnapshots.slice(0, 3).map((s) => s.snapshot_id);
+    const keywordIds = rankedWithNovelty.map((r) => r.keyword.keywordId);
+    const rankHistory = await getRankHistory(historySnapshotIds, keywordIds);
+
+    rankedWithMomentum = rankedWithNovelty.map((item) => {
+      const history = rankHistory.get(item.keyword.keywordId);
+      if (!history || history.length < 2) return item;
+
+      // history: 최신 스냅샷의 rank들 (작을수록 상위)
+      // 연속 상승: 각 스냅샷에서 rank가 점점 작아짐
+      let rising = 0;
+      let falling = 0;
+      for (let i = 0; i < history.length - 1; i++) {
+        if (history[i] < history[i + 1]) rising++; // 최신이 더 상위
+        if (history[i] > history[i + 1]) falling++;
+      }
+
+      let bonus = 0;
+      if (rising === history.length - 1) bonus = MOMENTUM_BONUS; // 연속 상승
+      if (falling === history.length - 1) bonus = -MOMENTUM_BONUS * 0.5; // 연속 하락 (약한 페널티)
+
+      if (bonus === 0) return item;
+      return {
+        ...item,
+        score: { ...item.score, total: parseFloat((item.score.total + bonus).toFixed(4)) },
+      };
+    }).sort((a, b) => b.score.total - a.score.total);
+  }
+
   const finalRanked = applyManualKeywordPriority(
     mode,
-    rankedWithNovelty,
+    rankedWithMomentum,
     activeManualKeywords
   )
     .slice(0, rankingLimit)
@@ -978,6 +1022,7 @@ export async function runSnapshotPipeline(
         score_frequency: item.score.frequency,
         score_authority: item.score.authority,
         score_velocity: item.score.velocity,
+        score_engagement: item.score.engagement,
         score_internal: item.score.internal,
         total_score: item.score.total,
         source_count: item.keyword.candidates.domains.size,
@@ -1048,6 +1093,7 @@ export async function runSnapshotPipeline(
         score_frequency: item.score.frequency,
         score_authority: item.score.authority,
         score_velocity: item.score.velocity,
+        score_engagement: item.score.engagement,
         score_internal: item.score.internal,
         summary_short: "",
         summary_short_en: "",

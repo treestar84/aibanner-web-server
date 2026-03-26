@@ -1084,6 +1084,61 @@ async function semanticMergeKeywords(
   }
 }
 
+// ─── Audience Relevance Filter ──────────────────────────────────────────────
+// 바이브코더/생성형AI 개발자 타겟 적합도를 LLM으로 판정, 낮은 점수 키워드 제거
+
+const AUDIENCE_RELEVANCE_PROMPT = `Score each keyword's relevance to developers who use generative AI tools (Cursor, Claude Code, Copilot, Windsurf, vibe coding).
+
+Rate 1-10:
+- 10: Directly about AI coding tools, new AI models, or developer-facing AI APIs
+- 7-9: AI tools, frameworks, or announcements developers would care about
+- 4-6: General AI industry news, somewhat relevant
+- 1-3: AI policy, regulation, business deals, hardware manufacturing, non-developer topics
+
+Input: JSON array of keyword strings.
+Output: JSON object mapping keyword → score (number 1-10). Include ALL keywords.
+Example: {"Claude Code CLI": 10, "AI 반도체 수출규제": 2, "Gemini 2.5 Pro": 9}`;
+
+async function filterByAudienceRelevance(
+  keywords: NormalizedKeyword[]
+): Promise<NormalizedKeyword[]> {
+  if (keywords.length <= 5) return keywords;
+
+  const keywordTexts = keywords.map((kw) => kw.keyword);
+  const client = new OpenAI();
+
+  try {
+    const response = await client.chat.completions.create({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      messages: [
+        { role: "system", content: AUDIENCE_RELEVANCE_PROMPT },
+        { role: "user", content: JSON.stringify(keywordTexts) },
+      ],
+      temperature: 0,
+    });
+
+    const content = response.choices[0]?.message?.content ?? "{}";
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return keywords;
+
+    const scores: Record<string, number> = JSON.parse(jsonMatch[0]);
+
+    const RELEVANCE_THRESHOLD = 3;
+    return keywords.filter((kw) => {
+      const score = scores[kw.keyword];
+      if (score == null) return true; // LLM이 누락한 키워드는 유지
+      if (score <= RELEVANCE_THRESHOLD) {
+        console.log(`[keywords] DROP(low_relevance=${score}): "${kw.keyword}"`);
+        return false;
+      }
+      return true;
+    });
+  } catch (err) {
+    console.warn("[keywords] Audience relevance check failed, skipping:", (err as Error).message);
+    return keywords;
+  }
+}
+
 function mergeCandidates(candidates: KeywordCandidate[], text: string): KeywordCandidate {
   const domains = new Set<string>();
   const matchedItems = new Set<number>();
@@ -1414,9 +1469,15 @@ export async function normalizeKeywords(
     });
   }
 
-  const mergedById = mergeNormalizedKeywordsById(result);
-  if (mergedById.length !== result.length) {
-    console.log(`[keywords] Merge by keywordId: ${result.length} → ${mergedById.length}`);
+  // Audience relevance: 바이브코더/생성형AI 타겟 적합도 필터링
+  const relevanceFiltered = await filterByAudienceRelevance(result);
+  console.log(
+    `[keywords] After audience_relevance: ${result.length} → ${relevanceFiltered.length} keywords`
+  );
+
+  const mergedById = mergeNormalizedKeywordsById(relevanceFiltered);
+  if (mergedById.length !== relevanceFiltered.length) {
+    console.log(`[keywords] Merge by keywordId: ${relevanceFiltered.length} → ${mergedById.length}`);
   }
 
   console.log(

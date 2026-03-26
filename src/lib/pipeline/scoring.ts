@@ -8,15 +8,16 @@ interface ScoreWeights {
   frequency: number;
   authority: number;
   velocity: number;
+  engagement: number;
   internal: number;
 }
 
 const DEFAULT_WEIGHTS: ScoreWeights = {
-  // velocity 비중을 높여 "급상승 키워드" 감도를 극대화한다.
-  recency: 0.35,
-  frequency: 0.16,
-  authority: 0.10,
-  velocity: 0.39,
+  recency: 0.28,
+  frequency: 0.12,
+  authority: 0.08,
+  velocity: 0.30,
+  engagement: 0.22,
   internal: 0.00,
 };
 
@@ -50,6 +51,7 @@ interface ScoreBreakdown {
   frequency: number;
   authority: number;
   velocity: number;
+  engagement: number;
   internal: number;
   total: number;
 }
@@ -60,6 +62,7 @@ function resolveWeights(custom?: Partial<ScoreWeights>): ScoreWeights {
     frequency: custom?.frequency ?? DEFAULT_WEIGHTS.frequency,
     authority: custom?.authority ?? DEFAULT_WEIGHTS.authority,
     velocity: custom?.velocity ?? DEFAULT_WEIGHTS.velocity,
+    engagement: custom?.engagement ?? DEFAULT_WEIGHTS.engagement,
     internal: custom?.internal ?? DEFAULT_WEIGHTS.internal,
   };
 }
@@ -99,6 +102,34 @@ function calculateVelocityScore(
   const ratio = (recentCount + 1) / (baselinePerRecentWindow + 1);
   const centered = (ratio - 1) / (ratio + 1); // -1..1
   return Math.max(0, Math.min(1, centered));
+}
+
+// ─── Engagement scoring ───────────────────────────────────────────────────────
+// 매칭된 아이템의 engagement(upvotes, stars, comments) 합산 → 0~1 정규화
+
+function calculateEngagementScore(
+  keyword: NormalizedKeyword,
+  sourceItems: RssItem[]
+): number {
+  if (keyword.candidates.matchedItems.size === 0) return 0;
+
+  let totalScore = 0;
+  let totalComments = 0;
+
+  for (const idx of keyword.candidates.matchedItems) {
+    const item = sourceItems[idx];
+    if (!item?.engagement) continue;
+    totalScore += item.engagement.score;
+    totalComments += item.engagement.comments;
+  }
+
+  // 합산이 0이면 engagement 데이터가 없는 소스만 매칭된 것
+  if (totalScore === 0 && totalComments === 0) return 0;
+
+  // log 스케일로 정규화 (score 100 ≈ 0.5, 1000 ≈ 0.75, 10000 ≈ 1.0)
+  const combined = totalScore + totalComments * 2; // 댓글은 가중치 2배
+  const normalized = Math.log10(combined + 1) / 4; // log10(10001) ≈ 4
+  return Math.min(1, Math.max(0, normalized));
 }
 
 export function calculateScore(
@@ -150,6 +181,11 @@ export function calculateScore(
     profile
   );
 
+  const engagement = calculateEngagementScore(
+    keyword,
+    options?.sourceItems ?? []
+  );
+
   // internal: 기본 0 (운영자 부스팅/블랙리스트로 추후 조정)
   const internal = 0;
 
@@ -158,6 +194,7 @@ export function calculateScore(
     frequency * weights.frequency +
     authority * weights.authority +
     velocity * weights.velocity +
+    engagement * weights.engagement +
     internal * weights.internal;
 
   return {
@@ -165,6 +202,7 @@ export function calculateScore(
     frequency: parseFloat(frequency.toFixed(4)),
     authority: parseFloat(authority.toFixed(4)),
     velocity: parseFloat(velocity.toFixed(4)),
+    engagement: parseFloat(engagement.toFixed(4)),
     internal,
     total: parseFloat(total.toFixed(4)),
   };

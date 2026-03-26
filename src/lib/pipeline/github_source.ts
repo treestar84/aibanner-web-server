@@ -8,6 +8,8 @@ interface GithubRepo {
   description: string | null;
   html_url: string;
   pushed_at: string;
+  stargazers_count: number;
+  forks_count: number;
 }
 
 interface GithubSearchResponse {
@@ -60,6 +62,10 @@ export async function collectGithubItems(
       feedTitle: "GitHub",
       tier: "COMMUNITY" as const,
       lang: "en",
+      engagement: {
+        score: repo.stargazers_count,
+        comments: repo.forks_count,
+      },
     }));
   } catch (err) {
     console.warn("[github_source] Failed:", (err as Error).message);
