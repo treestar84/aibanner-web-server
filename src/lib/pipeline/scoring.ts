@@ -12,11 +12,11 @@ interface ScoreWeights {
 }
 
 const DEFAULT_WEIGHTS: ScoreWeights = {
-  // recency/velocity를 동시에 반영해 "막 뜨는 키워드" 감도를 높인다.
-  recency: 0.45,
-  frequency: 0.18,
-  authority: 0.17,
-  velocity: 0.20,
+  // velocity 비중을 높여 "급상승 키워드" 감도를 극대화한다.
+  recency: 0.35,
+  frequency: 0.16,
+  authority: 0.10,
+  velocity: 0.39,
   internal: 0.00,
 };
 
@@ -28,7 +28,7 @@ export interface ScoringProfile {
 }
 
 const DEFAULT_PROFILE: ScoringProfile = {
-  recencyHalfLifeHours: 36,
+  recencyHalfLifeHours: 9,
   velocityRecentWindowHours: 6,
   velocityBaselineWindowHours: 18,
   weights: DEFAULT_WEIGHTS,

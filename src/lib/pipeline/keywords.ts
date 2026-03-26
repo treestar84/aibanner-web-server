@@ -945,6 +945,145 @@ function consolidateKeywordVariants(
   };
 }
 
+// ─── LLM Semantic Clustering ────────────────────────────────────────────────
+// 표면적으로 다르지만 같은 이벤트/토픽을 가리키는 키워드를 LLM으로 병합한다.
+// consolidateKeywordVariants(표면 유사도) 이후 실행.
+
+const SEMANTIC_MERGE_PROMPT = `You merge keywords that refer to the SAME event, product, or topic.
+
+## Rules
+- Group keywords ONLY if they clearly describe the same specific event/product/announcement.
+- Do NOT group keywords just because they are in the same domain (e.g. "GPT-5" and "OpenAI DevDay" are separate).
+- Each group must have a "canonical" keyword (the clearest, most specific one) and "merge" (the rest).
+- Only output groups with 2+ keywords. Singletons are omitted.
+
+## Input
+A JSON array of keyword strings.
+
+## Output
+Return JSON array only:
+[
+  {"canonical": "Claude 4 Opus", "merge": ["Anthropic 신모델", "claude-opus-4-20250514"]},
+  {"canonical": "Gemini 2.5 Pro", "merge": ["Google Gemini 업데이트"]}
+]
+
+If no keywords should be merged, return: []`;
+
+async function semanticMergeKeywords(
+  keywords: LLMKeyword[],
+  candidateMap: Map<string, KeywordCandidate>
+): Promise<{ keywords: LLMKeyword[]; candidateMap: Map<string, KeywordCandidate> }> {
+  if (keywords.length <= 3) return { keywords, candidateMap };
+
+  const keywordTexts = keywords.map((kw) => kw.keyword);
+  const client = new OpenAI();
+
+  try {
+    const response = await client.chat.completions.create({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      messages: [
+        { role: "system", content: SEMANTIC_MERGE_PROMPT },
+        { role: "user", content: JSON.stringify(keywordTexts) },
+      ],
+      temperature: 0,
+    });
+
+    const content = response.choices[0]?.message?.content ?? "[]";
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return { keywords, candidateMap };
+
+    const groups: Array<{ canonical: string; merge: string[] }> = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(groups) || groups.length === 0) return { keywords, candidateMap };
+
+    // 병합 대상 매핑: mergedKeyword → canonicalKeyword
+    const mergeTarget = new Map<string, string>();
+    for (const group of groups) {
+      if (!group.canonical || !Array.isArray(group.merge)) continue;
+      // canonical이 실제 키워드 목록에 있는지 확인
+      const canonicalLower = group.canonical.toLowerCase();
+      const canonicalExists = keywords.some(
+        (kw) => kw.keyword.toLowerCase() === canonicalLower
+      );
+      if (!canonicalExists) continue;
+
+      for (const m of group.merge) {
+        const mLower = m.toLowerCase();
+        // merge 대상도 실제 키워드 목록에 있어야 함
+        if (keywords.some((kw) => kw.keyword.toLowerCase() === mLower)) {
+          mergeTarget.set(mLower, canonicalLower);
+        }
+      }
+    }
+
+    if (mergeTarget.size === 0) return { keywords, candidateMap };
+
+    // 병합 실행
+    const newCandidateMap = new Map(candidateMap);
+    const outputKeywords: LLMKeyword[] = [];
+    const consumed = new Set<string>();
+
+    for (const kw of keywords) {
+      const kwLower = kw.keyword.toLowerCase();
+
+      // 이 키워드가 다른 키워드에 병합되어야 하면 스킵
+      if (mergeTarget.has(kwLower)) {
+        consumed.add(kwLower);
+        continue;
+      }
+
+      // 이 키워드가 canonical이면 merge 대상들의 후보 데이터를 흡수
+      const mergeSources = [...mergeTarget.entries()]
+        .filter(([, target]) => target === kwLower)
+        .map(([source]) => source);
+
+      if (mergeSources.length > 0) {
+        const canonicalCandidate = newCandidateMap.get(kwLower);
+        if (canonicalCandidate) {
+          const additionalAliases: string[] = [];
+          for (const sourceKey of mergeSources) {
+            const sourceCandidate = newCandidateMap.get(sourceKey);
+            if (sourceCandidate) {
+              for (const d of sourceCandidate.domains) canonicalCandidate.domains.add(d);
+              for (const idx of sourceCandidate.matchedItems) canonicalCandidate.matchedItems.add(idx);
+              if (sourceCandidate.latestAt > canonicalCandidate.latestAt) {
+                canonicalCandidate.latestAt = sourceCandidate.latestAt;
+              }
+              if ((TIER_ORDER[sourceCandidate.tier] ?? 9) < (TIER_ORDER[canonicalCandidate.tier] ?? 9)) {
+                canonicalCandidate.tier = sourceCandidate.tier;
+              }
+              canonicalCandidate.domainBonus = Math.max(canonicalCandidate.domainBonus, sourceCandidate.domainBonus);
+              canonicalCandidate.authorityOverride = Math.max(canonicalCandidate.authorityOverride, sourceCandidate.authorityOverride);
+            }
+            // 병합된 키워드 텍스트를 alias로 추가
+            const sourceKw = keywords.find((k) => k.keyword.toLowerCase() === sourceKey);
+            if (sourceKw) {
+              additionalAliases.push(sourceKw.keyword, ...sourceKw.aliases);
+            }
+          }
+          canonicalCandidate.count = canonicalCandidate.matchedItems.size;
+
+          // aliases 합치기
+          const allAliases = new Set([...kw.aliases, ...additionalAliases]);
+          outputKeywords.push({ keyword: kw.keyword, aliases: [...allAliases] });
+        } else {
+          outputKeywords.push(kw);
+        }
+      } else {
+        outputKeywords.push(kw);
+      }
+    }
+
+    console.log(
+      `[keywords] Semantic merge: ${mergeTarget.size} keyword(s) absorbed into canonical forms`
+    );
+
+    return { keywords: outputKeywords, candidateMap: newCandidateMap };
+  } catch (err) {
+    console.warn("[keywords] Semantic merge LLM call failed, skipping:", (err as Error).message);
+    return { keywords, candidateMap };
+  }
+}
+
 function mergeCandidates(candidates: KeywordCandidate[], text: string): KeywordCandidate {
   const domains = new Set<string>();
   const matchedItems = new Set<number>();
@@ -1190,14 +1329,20 @@ export async function normalizeKeywords(
     `[keywords] After consolidate: ${dedupedLlmKeywords.length} → ${consolidated.keywords.length} keywords`
   );
 
-  const llmKeywords = consolidated.keywords.filter((kw) => {
+  // 2b. LLM 의미 클러스터링 — 표면이 다르지만 같은 이벤트/토픽 병합
+  const semanticMerged = await semanticMergeKeywords(consolidated.keywords, consolidated.candidateMap);
+  console.log(
+    `[keywords] After semantic_merge: ${consolidated.keywords.length} → ${semanticMerged.keywords.length} keywords`
+  );
+
+  const llmKeywords = semanticMerged.keywords.filter((kw) => {
     if (!isExactlyExcludedKeyword(kw.keyword)) return true;
     console.log(`[keywords] DROP(exact_exclusion): "${kw.keyword}"`);
     return false;
   });
-  console.log(`[keywords] After exact_exclusion: ${consolidated.keywords.length} → ${llmKeywords.length} keywords`);
+  console.log(`[keywords] After exact_exclusion: ${semanticMerged.keywords.length} → ${llmKeywords.length} keywords`);
 
-  const enriched = enrichContextDependentKeywords(llmKeywords, consolidated.candidateMap);
+  const enriched = enrichContextDependentKeywords(llmKeywords, semanticMerged.candidateMap);
   console.log(
     `[keywords] After context_enrich: ${llmKeywords.length} → ${enriched.keywords.length} keywords`
   );

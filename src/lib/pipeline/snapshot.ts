@@ -146,7 +146,7 @@ function resolveSourceWindowProfile(): SourceWindowProfile {
 
   const minHours = parsePositiveIntEnv(
     process.env.PIPELINE_REALTIME_SOURCE_MIN_WINDOW_HOURS ?? legacyMin,
-    6,
+    24,
     1,
     168
   );
@@ -180,10 +180,10 @@ function resolveSourceWindowProfile(): SourceWindowProfile {
 }
 
 const DEFAULT_SCORING_WEIGHTS = {
-  recency: 0.42,
+  recency: 0.35,
   frequency: 0.16,
   authority: 0.10,
-  velocity: 0.32,
+  velocity: 0.39,
   internal: 0,
 };
 
