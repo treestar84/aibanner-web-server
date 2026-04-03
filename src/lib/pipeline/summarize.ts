@@ -73,14 +73,19 @@ const SUMMARY_MAX_CHARS = parsePositiveIntEnv(
 );
 
 function buildSystemPrompt(langLabel: "Korean" | "English"): string {
-  return `You are an AI trend analyst.
-Given a keyword and its related news snippets, respond with a JSON object containing a summary and hashtag bullets in ${langLabel}.
+  const today = new Date().toISOString().slice(0, 10);
+  return `You are an AI trend analyst. Today is ${today}.
+Given a keyword and its related news snippets (with publication dates), respond with a JSON object containing a summary and hashtag bullets in ${langLabel}.
 
 Response format (STRICT JSON, no markdown fences):
 {"summary":"...","bullets":["#Tag1","#Tag2","#Tag3"]}
 
 Rules (STRICT):
-- "summary": Maximum ${SUMMARY_MAX_CHARS} characters, plain prose, NO emojis, NO bullet points, NO markdown. Focus on why this keyword is trending NOW. Be factual and specific.
+- "summary": Maximum ${SUMMARY_MAX_CHARS} characters, plain prose, NO emojis, NO bullet points, NO markdown.
+  * This keyword is a real-time trending keyword. Your summary MUST explain what recent event or news (within the last 1-3 days) caused this keyword to trend. Reference specific events, announcements, releases, or incidents from the provided news snippets.
+  * Do NOT write a generic/encyclopedic description of the keyword. Minimize background explanation — readers already know the basics.
+  * If the news snippets clearly indicate why this keyword is hot right now, lead with that reason.
+  * Be factual, specific, and time-aware. Mention dates or timeframes when possible.
 - "bullets": 3-5 hashtag keywords that capture the core themes (e.g. "#Regulation", "#OpenSource"). Each tag must start with #. Use ${langLabel} where natural, keep proper nouns/tech terms in original form.`;
 }
 
@@ -127,7 +132,10 @@ export async function generateSummaries(
     .map((r) => `- [Original] ${r.title}${r.snippet ? `: ${r.snippet.slice(0, 150)}` : ""}`);
   const tavilyLines = sources
     .slice(0, SUMMARY_CONTEXT_LIMIT)
-    .map((s) => `- ${s.title}: ${s.snippet}`);
+    .map((s) => {
+      const dateTag = s.publishedAt ? `[${s.publishedAt.slice(0, 10)}] ` : "";
+      return `- ${dateTag}${s.title}: ${s.snippet}`;
+    });
   const context = [...rssLines, ...tavilyLines]
     .slice(0, SUMMARY_CONTEXT_LIMIT + 3)
     .join("\n");

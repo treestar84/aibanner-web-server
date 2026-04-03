@@ -73,7 +73,7 @@ async function fetchByQuery(
   client: ReturnType<typeof tavily>,
   query: string,
   typeHint: SourceType,
-  options: { maxResults: number; timeRange: "week" | "month" }
+  options: { maxResults: number; timeRange: "day" | "week" | "month" }
 ): Promise<TavilySource[]> {
   try {
     const res = await client.search(query, {
@@ -153,10 +153,11 @@ export async function collectSources(
   const socialQuery = `${exact} (site:threads.net OR site:reddit.com OR site:dev.to OR site:x.com OR site:twitter.com OR site:facebook.com OR site:instagram.com OR site:tiktok.com OR site:clien.net)`;
   const dataQuery = `${exact} (site:youtube.com OR site:youtu.be OR site:docs.google.com OR site:drive.google.com OR site:arxiv.org OR site:openreview.net OR filetype:pdf OR dataset OR research paper OR benchmark)`;
 
-  const [newsSeed, socialSeed, dataSeed, broadSeed] = await Promise.all([
+  // 뉴스는 최근 1일 우선 수집 후, 부족하면 week로 보충
+  const [newsDay, socialSeed, dataSeed, broadSeed] = await Promise.all([
     fetchByQuery(client, newsQuery, "news", {
       maxResults: TAVILY_NEWS_RESULTS,
-      timeRange: "week",
+      timeRange: "day",
     }),
     fetchByQuery(client, socialQuery, "social", {
       maxResults: TAVILY_SOCIAL_RESULTS,
@@ -171,6 +172,16 @@ export async function collectSources(
       timeRange: "month",
     }),
   ]);
+
+  // day 결과가 부족하면 week로 보충
+  let newsSeed = newsDay;
+  if (newsDay.length < TAVILY_NEWS_RESULTS) {
+    const newsWeek = await fetchByQuery(client, newsQuery, "news", {
+      maxResults: TAVILY_NEWS_RESULTS,
+      timeRange: "week",
+    });
+    newsSeed = dedupeByUrl([...newsDay, ...newsWeek]).slice(0, TAVILY_NEWS_RESULTS);
+  }
 
   const merged = dedupeByUrl([...newsSeed, ...socialSeed, ...dataSeed, ...broadSeed]);
   const relevant = filterRelevantSources(merged, keyword);
