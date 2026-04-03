@@ -220,3 +220,39 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
     return titles;
   }
 }
+
+/**
+ * 키워드가 고유명사(제품/서비스/브랜드)인지 일반 개념인지 분류합니다.
+ * proper → 원문 유지, common → 번역 대상
+ */
+export async function classifyKeywordType(
+  keywords: string[]
+): Promise<Array<"proper" | "common">> {
+  if (keywords.length === 0) return [];
+  const client = new OpenAI();
+
+  const prompt = `Classify each keyword as "proper" (product name, brand, service, project name — keep original) or "common" (general concept — translatable).
+
+Keywords:
+${keywords.map((k, i) => `${i + 1}. ${k}`).join("\n")}
+
+Respond with ONLY a JSON array of "proper" or "common", same order. Example: ["proper","common"]`;
+
+  try {
+    const res = await client.chat.completions.create({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: keywords.length * 12,
+      temperature: 0,
+    });
+
+    const raw = (res.choices[0]?.message?.content ?? "").trim();
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length === keywords.length) {
+      return parsed.map((v: string) => (v === "common" ? "common" : "proper"));
+    }
+  } catch {
+    // 분류 실패 시 안전하게 proper(원문 유지) 처리
+  }
+  return keywords.map(() => "proper");
+}
