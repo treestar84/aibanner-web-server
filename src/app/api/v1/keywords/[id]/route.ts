@@ -101,6 +101,12 @@ export async function GET(
       ? (keyword.keyword_en || keyword.keyword)
       : (keyword.keyword_ko || keyword.keyword);
 
+    const bulletsRaw = lang === "en"
+      ? (keyword.bullets_en || keyword.bullets_ko || "[]")
+      : (keyword.bullets_ko || "[]");
+    let bullets: string[] = [];
+    try { bullets = JSON.parse(bulletsRaw); } catch { /* empty */ }
+
     return NextResponse.json(
       {
         snapshotId: keyword.snapshot_id,
@@ -110,6 +116,7 @@ export async function GET(
         summary: lang === "en"
           ? (keyword.summary_short_en || keyword.summary_short)
           : keyword.summary_short,
+        bullets,
         sources: grouped,
       },
       {

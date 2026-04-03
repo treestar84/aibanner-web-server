@@ -10,7 +10,7 @@ import { collectProductHuntTopItems } from "./product_hunt_top_source";
 import { collectRedditItems } from "./reddit_source";
 import type { RssItem } from "./rss";
 import { normalizeKeywords } from "./keywords";
-import { rankKeywords, calculateDeltaRanks } from "./scoring";
+import { rankKeywords } from "./scoring";
 import type { ScoringProfile } from "./scoring";
 import type { PipelineMode } from "./mode";
 import { collectSources } from "./tavily";
@@ -19,10 +19,23 @@ import { batchExtractOgImages } from "./og-parser";
 import { determinePrimaryType, pickPrimarySource } from "./source_category";
 import { resolveScheduleUtc, type ScheduleSlot } from "./schedule";
 import {
-  buildManualKeywordId,
-  normalizeManualKeywordLookupKey,
-  normalizeManualKeywordText,
-} from "@/lib/manual-keywords";
+  buildKeywordPolicyMap,
+  calculateKeywordPolicyDelta,
+  calculateStabilityDelta,
+  suppressVersionFamilyDuplicates,
+  type RankingHistoryStats,
+} from "./ranking_policy";
+import {
+  applyInternalDelta,
+  applyManualKeywordPriority,
+  keywordLookupKeys,
+  type RankedKeywordWithDelta,
+} from "./manual_priority";
+import {
+  buildRankingCandidateDebug,
+  calculateFixedCandidateBonus,
+} from "./ranking_candidate_debug";
+import { normalizeManualKeywordLookupKey } from "@/lib/manual-keywords";
 import {
   insertSnapshot,
   deleteSnapshotIfEmpty,
@@ -30,6 +43,7 @@ import {
   insertSource,
   getPreviousRanks,
   getRecentSnapshots,
+  getTopKeywords,
   findCachedKeyword,
   upsertKeywordAliases,
   getSourceIngestionStates,
@@ -37,11 +51,8 @@ import {
   getActiveManualKeywords,
   insertSnapshotCandidates,
   getRankingWeights,
-  getRankHistory,
 } from "@/lib/db/queries";
-import type { Source, SourceIngestionState, ManualKeyword } from "@/lib/db/queries";
-
-type RankedKeywordWithDelta = ReturnType<typeof calculateDeltaRanks>[number];
+import type { Source, SourceIngestionState } from "@/lib/db/queries";
 const RANKING_CANDIDATE_LIMIT = 20;
 const DEFAULT_DETAILED_KEYWORD_LIMIT = 10;
 
@@ -500,130 +511,6 @@ async function ensureLocalizedStoredSources(sources: Source[]): Promise<Source[]
   }));
 }
 
-function keywordLookupKeys(item: RankedKeywordWithDelta): string[] {
-  const keys = new Set<string>();
-  const primary = normalizeManualKeywordLookupKey(item.keyword.keyword);
-  if (primary) keys.add(primary);
-  for (const alias of item.keyword.aliases) {
-    const normalizedAlias = normalizeManualKeywordLookupKey(alias);
-    if (normalizedAlias) keys.add(normalizedAlias);
-  }
-  return [...keys];
-}
-
-function createManualRankedItem(
-  mode: PipelineMode,
-  manualKeyword: ManualKeyword
-): RankedKeywordWithDelta {
-  const now = new Date();
-  const normalizedKeyword = normalizeManualKeywordText(manualKeyword.keyword);
-  return {
-    rank: 0,
-    deltaRank: 0,
-    isNew: true,
-    keyword: {
-      keywordId: buildManualKeywordId(mode, normalizedKeyword),
-      keyword: normalizedKeyword,
-      aliases: [],
-      candidates: {
-        text: normalizedKeyword,
-        count: 1,
-        domains: new Set(["manual"]),
-        matchedItems: new Set(),
-        latestAt: now,
-        tier: "P0_CURATED",
-        domainBonus: 0,
-        authorityOverride: 0,
-      },
-    },
-    score: {
-      recency: 1,
-      frequency: 1,
-      authority: 1,
-      velocity: 1,
-      engagement: 1,
-      internal: MANUAL_KEYWORD_INTERNAL_BONUS,
-      total: parseFloat((10 + MANUAL_KEYWORD_TOTAL_BONUS).toFixed(4)),
-    },
-  };
-}
-
-function applyManualKeywordPriority(
-  mode: PipelineMode,
-  rankedKeywords: RankedKeywordWithDelta[],
-  manualKeywords: ManualKeyword[]
-): RankedKeywordWithDelta[] {
-  if (manualKeywords.length === 0) return rankedKeywords;
-
-  const uniqueManualKeywordKeys: string[] = [];
-  const manualByKey = new Map<string, ManualKeyword>();
-  for (const row of manualKeywords) {
-    const key = normalizeManualKeywordLookupKey(row.keyword);
-    if (!key || manualByKey.has(key)) continue;
-    manualByKey.set(key, row);
-    uniqueManualKeywordKeys.push(key);
-  }
-  if (uniqueManualKeywordKeys.length === 0) return rankedKeywords;
-
-  const boostedKeywords = rankedKeywords.map((item) => {
-    const matched = keywordLookupKeys(item).some((key) => manualByKey.has(key));
-    if (!matched) return item;
-
-    return {
-      ...item,
-      score: {
-        ...item.score,
-        internal: parseFloat(
-          (item.score.internal + MANUAL_KEYWORD_INTERNAL_BONUS).toFixed(4)
-        ),
-        total: parseFloat(
-          (item.score.total + MANUAL_KEYWORD_TOTAL_BONUS).toFixed(4)
-        ),
-      },
-    };
-  });
-
-  const prioritized: RankedKeywordWithDelta[] = [];
-  const usedKeywordIds = new Set<string>();
-  const usedManualKeys = new Set<string>();
-
-  const pushUnique = (item: RankedKeywordWithDelta) => {
-    const id = item.keyword.keywordId;
-    if (usedKeywordIds.has(id)) return;
-    const keys = keywordLookupKeys(item);
-    const hasManualCollision = keys.some(
-      (key) => manualByKey.has(key) && usedManualKeys.has(key)
-    );
-    if (hasManualCollision) return;
-
-    prioritized.push(item);
-    usedKeywordIds.add(id);
-    for (const key of keys) {
-      usedManualKeys.add(key);
-    }
-  };
-
-  for (const key of uniqueManualKeywordKeys) {
-    const existing = boostedKeywords.find((item) =>
-      keywordLookupKeys(item).includes(key)
-    );
-    if (existing) {
-      pushUnique(existing);
-      continue;
-    }
-
-    const manualRow = manualByKey.get(key);
-    if (!manualRow) continue;
-    pushUnique(createManualRankedItem(mode, manualRow));
-  }
-
-  for (const item of boostedKeywords) {
-    pushUnique(item);
-  }
-
-  return prioritized;
-}
-
 // ─── Per-keyword processor ────────────────────────────────────────────────────
 
 async function processKeyword(
@@ -669,6 +556,8 @@ async function processKeyword(
       score_internal: item.score.internal,
       summary_short: cached.keyword.summary_short,
       summary_short_en: cached.keyword.summary_short_en,
+      bullets_ko: cached.keyword.bullets_ko,
+      bullets_en: cached.keyword.bullets_en,
       primary_type: primaryType,
       top_source_title: topSource?.title ?? cached.keyword.top_source_title,
       top_source_title_ko:
@@ -735,6 +624,8 @@ async function processKeyword(
       score_internal: item.score.internal,
       summary_short: "",
       summary_short_en: "",
+      bullets_ko: "[]",
+      bullets_en: "[]",
       primary_type: "news",
       top_source_title: null,
       top_source_title_ko: null,
@@ -806,8 +697,10 @@ async function processKeyword(
     score_velocity: item.score.velocity,
     score_engagement: item.score.engagement,
     score_internal: item.score.internal,
-    summary_short: summaries.ko,
-    summary_short_en: summaries.en,
+    summary_short: summaries.ko.summary,
+    summary_short_en: summaries.en.summary,
+    bullets_ko: JSON.stringify(summaries.ko.bullets),
+    bullets_en: JSON.stringify(summaries.en.bullets),
     primary_type: primaryType,
     top_source_title: topSource?.title ?? null,
     top_source_title_ko: topSourceLocalized?.ko ?? topSource?.title ?? null,
@@ -929,78 +822,109 @@ export async function runSnapshotPipeline(
     60,
     Math.max(RANKING_CANDIDATE_LIMIT, activeManualKeywords.length + 10)
   );
+  const candidateLimit = Math.min(
+    Math.max(rankingLimit * 3, 40),
+    Math.max(normalizedKeywords.length, rankingLimit)
+  );
   console.log(
-    `[snapshot] Manual keywords: active=${activeManualKeywords.length}, rankingLimit=${rankingLimit}`
+    `[snapshot] Manual keywords: active=${activeManualKeywords.length}, rankingLimit=${rankingLimit}, candidateLimit=${candidateLimit}`
   );
 
   // 4~6) 스코어링 + Top N 선별
   console.log("[snapshot] Step 4-6: Scoring and ranking...");
   const ranked = rankKeywords(normalizedKeywords, {
-    limit: rankingLimit,
+    limit: candidateLimit,
     sourceItems: allItems,
     profile: profile.scoring,
   });
+  const policyMetaByKeywordId = buildKeywordPolicyMap(normalizedKeywords, allItems);
+  const policyDeltaByKeywordId = new Map<string, number>();
+  const rankedWithPolicy = ranked
+    .map((item) => {
+      const meta = policyMetaByKeywordId.get(item.keyword.keywordId);
+      const delta = meta ? calculateKeywordPolicyDelta(item, meta) : 0;
+      policyDeltaByKeywordId.set(item.keyword.keywordId, delta);
+      return applyInternalDelta(item, delta);
+    })
+    .sort((a, b) => b.score.total - a.score.total);
+  const dedupedRanked = suppressVersionFamilyDuplicates(
+    rankedWithPolicy,
+    policyMetaByKeywordId
+  ).sort((a, b) => b.score.total - a.score.total);
 
   // 이전 스냅샷 rank 조회
   const snapshotId = buildSnapshotId();
   const prevRankMap = prevSnapshot
     ? await getPreviousRanks(
         prevSnapshot.snapshot_id,
-        ranked.map((r) => r.keyword.keywordId)
+        dedupedRanked.map((r) => r.keyword.keywordId)
       )
     : new Map<string, number>();
-  const rankedWithDelta = calculateDeltaRanks(ranked, prevRankMap);
+  const rankedWithHistory: RankedKeywordWithDelta[] = dedupedRanked.map((item) => {
+    const prevRank = prevRankMap.get(item.keyword.keywordId);
+    return {
+      ...item,
+      deltaRank: prevRank == null ? 0 : prevRank - item.rank,
+      isNew: prevRank == null,
+    };
+  });
 
-  // Novelty 보너스: 새로 등장한 키워드에 +0.15 적용
-  const NOVELTY_BONUS = 0.15;
-  const rankedWithNovelty = rankedWithDelta
-    .map((item) =>
-      item.isNew
-        ? { ...item, score: { ...item.score, total: item.score.total + NOVELTY_BONUS } }
-        : item
-    )
-    .sort((a, b) => b.score.total - a.score.total);
+  const recentTopKeywordLists = await Promise.all(
+    recentSnapshots.map((snapshot) => getTopKeywords(snapshot.snapshot_id, 10))
+  );
+  const historyByKeywordId = new Map<string, RankingHistoryStats>();
+  for (const item of rankedWithHistory) {
+    let appearances = 0;
+    let previousRank: number | null = null;
 
-  // Cross-snapshot momentum: 최근 3 스냅샷에서 연속 상승 시 보너스, 연속 하락 시 페널티
-  const MOMENTUM_BONUS = 0.08;
-  let rankedWithMomentum = rankedWithNovelty;
-  if (recentSnapshots.length >= 2) {
-    const historySnapshotIds = recentSnapshots.slice(0, 3).map((s) => s.snapshot_id);
-    const keywordIds = rankedWithNovelty.map((r) => r.keyword.keywordId);
-    const rankHistory = await getRankHistory(historySnapshotIds, keywordIds);
+    for (let i = 0; i < recentTopKeywordLists.length; i++) {
+      const hit = recentTopKeywordLists[i].find(
+        (keyword) => keyword.keyword_id === item.keyword.keywordId
+      );
+      if (!hit) continue;
+      appearances += 1;
+      if (i === 0) previousRank = hit.rank;
+    }
 
-    rankedWithMomentum = rankedWithNovelty.map((item) => {
-      const history = rankHistory.get(item.keyword.keywordId);
-      if (!history || history.length < 2) return item;
-
-      // history: 최신 스냅샷의 rank들 (작을수록 상위)
-      // 연속 상승: 각 스냅샷에서 rank가 점점 작아짐
-      let rising = 0;
-      let falling = 0;
-      for (let i = 0; i < history.length - 1; i++) {
-        if (history[i] < history[i + 1]) rising++; // 최신이 더 상위
-        if (history[i] > history[i + 1]) falling++;
-      }
-
-      let bonus = 0;
-      if (rising === history.length - 1) bonus = MOMENTUM_BONUS; // 연속 상승
-      if (falling === history.length - 1) bonus = -MOMENTUM_BONUS * 0.5; // 연속 하락 (약한 페널티)
-
-      if (bonus === 0) return item;
-      return {
-        ...item,
-        score: { ...item.score, total: parseFloat((item.score.total + bonus).toFixed(4)) },
-      };
-    }).sort((a, b) => b.score.total - a.score.total);
+    historyByKeywordId.set(item.keyword.keywordId, {
+      appearances,
+      previousRank,
+    });
   }
 
-  const finalRanked = applyManualKeywordPriority(
+  const stabilityDeltaByKeywordId = new Map<string, number>();
+  const rankedWithStability = rankedWithHistory
+    .map((item) => {
+      const delta = calculateStabilityDelta(
+        item,
+        historyByKeywordId.get(item.keyword.keywordId)
+      );
+      stabilityDeltaByKeywordId.set(item.keyword.keywordId, delta);
+      return applyInternalDelta(item, delta);
+    })
+    .sort((a, b) => b.score.total - a.score.total);
+
+  const manualPriority = applyManualKeywordPriority(
     mode,
-    rankedWithMomentum,
-    activeManualKeywords
-  )
+    rankedWithStability,
+    activeManualKeywords,
+    {
+      internalBonus: MANUAL_KEYWORD_INTERNAL_BONUS,
+      totalBonus: MANUAL_KEYWORD_TOTAL_BONUS,
+    }
+  );
+  const finalRanked = manualPriority.items
     .slice(0, rankingLimit)
-    .map((item, idx) => ({ ...item, rank: idx + 1 }));
+    .map((item, idx) => {
+      const nextRank = idx + 1;
+      const prevRank = prevRankMap.get(item.keyword.keywordId);
+      return {
+        ...item,
+        rank: nextRank,
+        isNew: prevRank == null,
+        deltaRank: prevRank == null ? 0 : prevRank - nextRank,
+      };
+    });
 
   if (finalRanked.length === 0) {
     throw new Error(
@@ -1023,12 +947,22 @@ export async function runSnapshotPipeline(
         score_authority: item.score.authority,
         score_velocity: item.score.velocity,
         score_engagement: item.score.engagement,
-        score_internal: item.score.internal,
+        score_internal: calculateFixedCandidateBonus(
+          item.score,
+          profile.scoring.weights
+        ),
         total_score: item.score.total,
         source_count: item.keyword.candidates.domains.size,
         top_source_title: null,
         top_source_domain: [...item.keyword.candidates.domains][0] ?? null,
         is_manual: keywordLookupKeys(item).some((key) => manualKeywordKeySet.has(key)),
+        ...buildRankingCandidateDebug({
+          policyDelta: policyDeltaByKeywordId.get(item.keyword.keywordId) ?? 0,
+          stabilityDelta: stabilityDeltaByKeywordId.get(item.keyword.keywordId) ?? 0,
+          manualDelta: manualPriority.manualDeltaByKeywordId.get(item.keyword.keywordId) ?? 0,
+          isInsertedManual: manualPriority.insertedKeywordIds.has(item.keyword.keywordId),
+          meta: policyMetaByKeywordId.get(item.keyword.keywordId) ?? null,
+        }),
       }))
     );
     console.log(`[snapshot] Saved ${finalRanked.length} candidates for ranking simulator`);
@@ -1097,6 +1031,8 @@ export async function runSnapshotPipeline(
         score_internal: item.score.internal,
         summary_short: "",
         summary_short_en: "",
+        bullets_ko: "[]",
+        bullets_en: "[]",
         primary_type: "news",
         top_source_title: null,
         top_source_title_ko: null,

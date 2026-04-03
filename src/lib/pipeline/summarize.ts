@@ -74,20 +74,50 @@ const SUMMARY_MAX_CHARS = parsePositiveIntEnv(
 
 function buildSystemPrompt(langLabel: "Korean" | "English"): string {
   return `You are an AI trend analyst.
-Given a keyword and its related news snippets, write a concise summary in ${langLabel}.
+Given a keyword and its related news snippets, respond with a JSON object containing a summary and hashtag bullets in ${langLabel}.
+
+Response format (STRICT JSON, no markdown fences):
+{"summary":"...","bullets":["#Tag1","#Tag2","#Tag3"]}
 
 Rules (STRICT):
-- Maximum ${SUMMARY_MAX_CHARS} characters (${langLabel})
-- NO emojis, NO bullet points, NO markdown
-- Plain prose only
-- Focus on why this keyword is trending NOW
-- Be factual and specific`;
+- "summary": Maximum ${SUMMARY_MAX_CHARS} characters, plain prose, NO emojis, NO bullet points, NO markdown. Focus on why this keyword is trending NOW. Be factual and specific.
+- "bullets": 3-5 hashtag keywords that capture the core themes (e.g. "#Regulation", "#OpenSource"). Each tag must start with #. Use ${langLabel} where natural, keep proper nouns/tech terms in original form.`;
+}
+
+interface SummaryResult {
+  summary: string;
+  bullets: string[];
+}
+
+interface SummariesResult {
+  ko: SummaryResult;
+  en: SummaryResult;
+}
+
+function parseSummaryResponse(raw: string): SummaryResult {
+  const content = raw.trim();
+  try {
+    // Strip markdown fences if present
+    const jsonStr = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    const parsed = JSON.parse(jsonStr);
+    const summary = cleanSummary(typeof parsed.summary === "string" ? parsed.summary : "");
+    const bullets: string[] = Array.isArray(parsed.bullets)
+      ? parsed.bullets
+          .filter((b: unknown) => typeof b === "string")
+          .map((b: string) => (b.startsWith("#") ? b : `#${b}`))
+          .slice(0, 5)
+      : [];
+    return { summary, bullets };
+  } catch {
+    // Fallback: treat entire response as summary, no bullets
+    return { summary: cleanSummary(content), bullets: [] };
+  }
 }
 
 export async function generateSummaries(
   keyword: string,
   sources: TavilySource[]
-): Promise<{ ko: string; en: string }> {
+): Promise<SummariesResult> {
   const client = new OpenAI();
 
   const context = sources
@@ -105,7 +135,7 @@ export async function generateSummaries(
         { role: "system", content: buildSystemPrompt("Korean") },
         { role: "user", content: userMessage },
       ],
-      max_tokens: 600,
+      max_tokens: 800,
       temperature: 0.3,
     });
 
@@ -116,7 +146,7 @@ export async function generateSummaries(
             { role: "system", content: buildSystemPrompt("English") },
             { role: "user", content: userMessage },
           ],
-          max_tokens: 600,
+          max_tokens: 800,
           temperature: 0.3,
         })
       : Promise.resolve(null);
@@ -124,14 +154,22 @@ export async function generateSummaries(
     const [koRes, enRes] = await Promise.all([koPromise, enPromise]);
 
     return {
-      ko: cleanSummary(koRes.choices[0]?.message?.content ?? ""),
-      en: enRes ? cleanSummary(enRes.choices[0]?.message?.content ?? "") : "",
+      ko: parseSummaryResponse(koRes.choices[0]?.message?.content ?? ""),
+      en: enRes
+        ? parseSummaryResponse(enRes.choices[0]?.message?.content ?? "")
+        : { summary: "", bullets: [] },
     };
   } catch (err) {
     console.warn(`[summarize] Failed for "${keyword}":`, err);
     return {
-      ko: `${keyword} 관련 AI 트렌드가 최근 주목받고 있습니다.`,
-      en: `${keyword} is currently trending in the AI space.`,
+      ko: {
+        summary: `${keyword} 관련 AI 트렌드가 최근 주목받고 있습니다.`,
+        bullets: [],
+      },
+      en: {
+        summary: `${keyword} is currently trending in the AI space.`,
+        bullets: [],
+      },
     };
   }
 }
@@ -142,7 +180,7 @@ export async function generateSummary(
   sources: TavilySource[]
 ): Promise<string> {
   const result = await generateSummaries(keyword, sources);
-  return result.ko;
+  return result.ko.summary;
 }
 
 export async function batchTranslateTitles(

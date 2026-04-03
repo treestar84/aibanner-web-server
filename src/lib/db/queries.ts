@@ -36,6 +36,8 @@ export interface Keyword {
   score_internal: number;
   summary_short: string;
   summary_short_en: string;
+  bullets_ko: string;
+  bullets_en: string;
   primary_type: "news" | "social" | "data" | "web" | "video" | "image";
   top_source_title: string | null;
   top_source_title_ko: string | null;
@@ -656,7 +658,7 @@ export async function insertKeyword(keyword: Omit<Keyword, "created_at">): Promi
     INSERT INTO keywords (
       snapshot_id, keyword_id, keyword, keyword_ko, keyword_en, rank, delta_rank, is_new,
       score, score_recency, score_frequency, score_authority, score_velocity, score_engagement, score_internal,
-      summary_short, summary_short_en, primary_type,
+      summary_short, summary_short_en, bullets_ko, bullets_en, primary_type,
       top_source_title, top_source_title_ko, top_source_title_en,
       top_source_url, top_source_domain, top_source_image_url
     ) VALUES (
@@ -665,7 +667,8 @@ export async function insertKeyword(keyword: Omit<Keyword, "created_at">): Promi
       ${keyword.rank}, ${keyword.delta_rank}, ${keyword.is_new},
       ${keyword.score}, ${keyword.score_recency}, ${keyword.score_frequency},
       ${keyword.score_authority}, ${keyword.score_velocity}, ${keyword.score_engagement}, ${keyword.score_internal},
-      ${keyword.summary_short}, ${keyword.summary_short_en}, ${keyword.primary_type},
+      ${keyword.summary_short}, ${keyword.summary_short_en},
+      ${keyword.bullets_ko}, ${keyword.bullets_en}, ${keyword.primary_type},
       ${keyword.top_source_title}, ${keyword.top_source_title_ko}, ${keyword.top_source_title_en},
       ${keyword.top_source_url},
       ${keyword.top_source_domain}, ${keyword.top_source_image_url}
@@ -748,9 +751,10 @@ export async function getRankHistory(
   const rows = (await sql`
     SELECT k.keyword_id, k.snapshot_id, k.rank
     FROM keywords k
+    JOIN snapshots s ON s.snapshot_id = k.snapshot_id
     WHERE k.keyword_id = ANY(${keywordIds})
       AND k.snapshot_id = ANY(${snapshotIds})
-    ORDER BY k.created_at DESC
+    ORDER BY s.created_at DESC, k.rank ASC
   `) as { keyword_id: string; snapshot_id: string; rank: number }[];
 
   const result = new Map<string, number[]>();
@@ -760,11 +764,6 @@ export async function getRankHistory(
       result.set(row.keyword_id, []);
     }
     result.get(row.keyword_id)!.push(row.rank);
-  }
-
-  // 각 키워드의 rank를 스냅샷 시간순 정렬 (최신 먼저)
-  for (const [, ranks] of result) {
-    ranks.sort((a, b) => a - b); // 이미 ORDER BY DESC로 가져왔으므로 그대로
   }
 
   return result;
@@ -1050,6 +1049,15 @@ export interface SnapshotCandidate {
   top_source_title: string | null;
   top_source_domain: string | null;
   is_manual: boolean;
+  policy_delta: number;
+  stability_delta: number;
+  manual_delta: number;
+  family_key: string | null;
+  family_label: string | null;
+  family_source: string | null;
+  keyword_kind: string | null;
+  version_kind: string | null;
+  internal_reason: string | null;
 }
 
 export async function insertSnapshotCandidates(
@@ -1064,13 +1072,19 @@ export async function insertSnapshotCandidates(
         INSERT INTO snapshot_candidates (
           snapshot_id, keyword, keyword_normalized,
           score_recency, score_frequency, score_authority, score_velocity, score_engagement, score_internal,
-          total_score, source_count, top_source_title, top_source_domain, is_manual
+          total_score, source_count, top_source_title, top_source_domain, is_manual,
+          policy_delta, stability_delta, manual_delta,
+          family_key, family_label, family_source,
+          keyword_kind, version_kind, internal_reason
         ) VALUES (
           ${snapshotId}, ${c.keyword}, ${c.keyword_normalized},
           ${c.score_recency}, ${c.score_frequency}, ${c.score_authority},
           ${c.score_velocity}, ${c.score_engagement}, ${c.score_internal},
           ${c.total_score}, ${c.source_count},
-          ${c.top_source_title}, ${c.top_source_domain}, ${c.is_manual}
+          ${c.top_source_title}, ${c.top_source_domain}, ${c.is_manual},
+          ${c.policy_delta}, ${c.stability_delta}, ${c.manual_delta},
+          ${c.family_key}, ${c.family_label}, ${c.family_source},
+          ${c.keyword_kind}, ${c.version_kind}, ${c.internal_reason}
         )
         ON CONFLICT (snapshot_id, keyword_normalized) DO NOTHING
       `
@@ -1095,7 +1109,7 @@ export interface RankingWeights {
   w_frequency: number;
   w_authority: number;
   w_velocity: number;
-  w_engagement?: number;
+  w_engagement: number;
   w_internal: number;
   updated_at: string;
 }
@@ -1128,16 +1142,18 @@ export async function upsertRankingWeights(weights: {
   w_frequency: number;
   w_authority: number;
   w_velocity: number;
+  w_engagement: number;
   w_internal: number;
 }): Promise<RankingWeights> {
   const rows = (await sql`
-    INSERT INTO ranking_weights (id, w_recency, w_frequency, w_authority, w_velocity, w_internal, updated_at)
-    VALUES (1, ${weights.w_recency}, ${weights.w_frequency}, ${weights.w_authority}, ${weights.w_velocity}, ${weights.w_internal}, NOW())
+    INSERT INTO ranking_weights (id, w_recency, w_frequency, w_authority, w_velocity, w_engagement, w_internal, updated_at)
+    VALUES (1, ${weights.w_recency}, ${weights.w_frequency}, ${weights.w_authority}, ${weights.w_velocity}, ${weights.w_engagement}, ${weights.w_internal}, NOW())
     ON CONFLICT (id) DO UPDATE
     SET w_recency = EXCLUDED.w_recency,
         w_frequency = EXCLUDED.w_frequency,
         w_authority = EXCLUDED.w_authority,
         w_velocity = EXCLUDED.w_velocity,
+        w_engagement = EXCLUDED.w_engagement,
         w_internal = EXCLUDED.w_internal,
         updated_at = NOW()
     RETURNING *

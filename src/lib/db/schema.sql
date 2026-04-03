@@ -133,6 +133,8 @@ ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS pipeline_mode TEXT NOT NULL DEFAU
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS keyword_ko TEXT NOT NULL DEFAULT '';
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS keyword_en TEXT NOT NULL DEFAULT '';
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS summary_short_en TEXT NOT NULL DEFAULT '';
+ALTER TABLE keywords ADD COLUMN IF NOT EXISTS bullets_ko TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE keywords ADD COLUMN IF NOT EXISTS bullets_en TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS top_source_title_ko TEXT;
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS top_source_title_en TEXT;
 ALTER TABLE keywords ADD COLUMN IF NOT EXISTS score_velocity FLOAT NOT NULL DEFAULT 0;
@@ -257,6 +259,16 @@ CREATE TABLE IF NOT EXISTS snapshot_candidates (
   is_manual          BOOLEAN DEFAULT FALSE,
   PRIMARY KEY (snapshot_id, keyword_normalized)
 );
+
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS policy_delta REAL DEFAULT 0;
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS stability_delta REAL DEFAULT 0;
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS manual_delta REAL DEFAULT 0;
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS family_key TEXT;
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS family_label TEXT;
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS family_source TEXT;
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS keyword_kind TEXT;
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS version_kind TEXT;
+ALTER TABLE snapshot_candidates ADD COLUMN IF NOT EXISTS internal_reason TEXT;
 
 -- ============================================================
 -- ranking_weights: 관리자 가중치 설정 (단일 행)
