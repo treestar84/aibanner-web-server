@@ -31,17 +31,19 @@ interface RedditListing {
   };
 }
 
+type RedditEndpoint = "hot" | "rising";
+
 async function fetchSubreddit(
   subreddit: string,
-  cutoff: Date
+  cutoff: Date,
+  endpoint: RedditEndpoint = "hot"
 ): Promise<RssItem[]> {
   try {
+    const limit = endpoint === "rising" ? 15 : 30;
     const res = await fetch(
-      `https://www.reddit.com/r/${subreddit}/hot.json?limit=30`,
+      `https://www.reddit.com/r/${subreddit}/${endpoint}.json?limit=${limit}`,
       {
-        headers: {
-          "User-Agent": "AI-Trend-Widget/1.0",
-        },
+        headers: { "User-Agent": "AI-Trend-Widget/1.0" },
         signal: AbortSignal.timeout(10000),
       }
     );
@@ -70,7 +72,7 @@ async function fetchSubreddit(
       }));
   } catch (err) {
     console.warn(
-      `[reddit_source] r/${subreddit} failed:`,
+      `[reddit_source] r/${subreddit}/${endpoint} failed:`,
       (err as Error).message
     );
     return [];
@@ -82,12 +84,26 @@ export async function collectRedditItems(
 ): Promise<RssItem[]> {
   const cutoff = new Date(Date.now() - windowHours * 60 * 60 * 1000);
 
-  // 순차 호출 (Reddit rate limit 방지)
   const all: RssItem[] = [];
+  const seen = new Set<string>();
+
   for (const sub of SUBREDDITS) {
-    const items = await fetchSubreddit(sub, cutoff);
-    console.log(`[reddit_source] r/${sub}: ${items.length} items`);
-    all.push(...items);
+    // hot + rising 병렬 수집
+    const [hotItems, risingItems] = await Promise.all([
+      fetchSubreddit(sub, cutoff, "hot"),
+      fetchSubreddit(sub, cutoff, "rising"),
+    ]);
+
+    for (const item of [...hotItems, ...risingItems]) {
+      if (seen.has(item.link)) continue;
+      seen.add(item.link);
+      all.push(item);
+    }
+
+    console.log(
+      `[reddit_source] r/${sub}: ${hotItems.length} hot, ${risingItems.length} rising`
+    );
+
     // Reddit rate limit: 1초 간격
     if (sub !== SUBREDDITS[SUBREDDITS.length - 1]) {
       await new Promise((resolve) => setTimeout(resolve, 1000));

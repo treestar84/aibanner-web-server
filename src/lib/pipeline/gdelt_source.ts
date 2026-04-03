@@ -1,7 +1,5 @@
 import type { RssItem } from "./rss";
-
-const GDELT_QUERY =
-  '"AI" OR "LLM" OR "large language model" OR "GPT" OR "Claude" OR "Gemini" OR "OpenAI" OR "Anthropic" OR "DeepMind" OR "NVIDIA"';
+import { buildDynamicQuery } from "./dynamic_query";
 
 interface GdeltArticle {
   url: string;
@@ -32,11 +30,17 @@ function parseGdeltDate(seendate: string): Date {
 
 export async function collectGdeltItems(windowHours = 72): Promise<RssItem[]> {
   try {
+    const dynamicQuery = await buildDynamicQuery();
+    const gdeltQuery = dynamicQuery
+      .split(" OR ")
+      .map((term) => `"${term.replace(/^"|"$/g, "").trim()}"`)
+      .join(" OR ");
+
     const until = new Date();
     const since = new Date(until.getTime() - windowHours * 60 * 60 * 1000);
 
     const params = new URLSearchParams({
-      query: GDELT_QUERY,
+      query: gdeltQuery,
       mode: "artlist",
       maxrecords: "250",
       format: "json",

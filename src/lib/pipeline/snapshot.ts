@@ -525,7 +525,8 @@ async function processKeyword(
   recentSnapshotIds: string[],
   defaultImage: string,
   allowExternalEnrichmentForNewKeywords: boolean,
-  forceExternalEnrichmentForKeyword: boolean
+  forceExternalEnrichmentForKeyword: boolean,
+  allSourceItems: RssItem[] = []
 ): Promise<{ reused: boolean }> {
   const kw = item.keyword;
   const keywordAliases = [kw.keyword, ...kw.aliases];
@@ -665,9 +666,19 @@ async function processKeyword(
     }
   }
 
+  // RSS 원본 기사에서 컨텍스트 추출 (matchedItems 인덱스 활용)
+  const rssContext: Array<{ title: string; snippet: string }> = [];
+  for (const idx of kw.candidates.matchedItems) {
+    const rssItem = allSourceItems[idx];
+    if (!rssItem) continue;
+    rssContext.push({ title: rssItem.title, snippet: rssItem.summary || "" });
+    if (rssContext.length >= 5) break;
+  }
+
   const summaries = await generateSummaries(
     kw.keyword,
-    sourcesMap.news.length > 0 ? sourcesMap.news : allSources.slice(0, 5)
+    sourcesMap.news.length > 0 ? sourcesMap.news : allSources.slice(0, 5),
+    rssContext
   );
   const localizedKeyword = await ensureLocalizedKeyword(kw.keyword);
   const primaryType = determinePrimaryType(allSources);
@@ -1007,7 +1018,8 @@ export async function runSnapshotPipeline(
         recentSnapshotIds,
         DEFAULT_IMAGE,
         profile.allowExternalEnrichmentForNewKeywords,
-        forceExternalEnrichmentForKeyword
+        forceExternalEnrichmentForKeyword,
+        allItems
       );
     }
   );

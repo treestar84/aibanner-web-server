@@ -175,6 +175,9 @@ export async function collectSources(
   const merged = dedupeByUrl([...newsSeed, ...socialSeed, ...dataSeed, ...broadSeed]);
   const relevant = filterRelevantSources(merged, keyword);
 
+  // 관련성 점수로 정렬
+  relevant.sort((a, b) => scoreRelevance(b, keyword) - scoreRelevance(a, keyword));
+
   const limits: Record<SourceType, number> = {
     news: TAVILY_NEWS_RESULTS,
     social: TAVILY_SOCIAL_RESULTS,
@@ -232,4 +235,28 @@ function filterRelevantSources(
 
     return false;
   });
+}
+
+function scoreRelevance(source: TavilySource, keyword: string): number {
+  const kw = keyword.trim().toLowerCase();
+  const title = source.title.toLowerCase();
+  const snippet = (source.snippet ?? "").toLowerCase();
+
+  let score = 0;
+  if (title.includes(kw)) {
+    score = 1.0;
+  } else if (snippet.includes(kw)) {
+    score = 0.4;
+  } else {
+    const kwWords = kw.split(/\s+/);
+    const matchedInTitle = kwWords.filter((w) => title.includes(w)).length;
+    score = (matchedInTitle / kwWords.length) * 0.7;
+  }
+
+  if (source.publishedAt) {
+    const ageHours = (Date.now() - new Date(source.publishedAt).getTime()) / 3600000;
+    if (ageHours < 24) score += 0.1;
+  }
+
+  return Math.min(1, score);
 }

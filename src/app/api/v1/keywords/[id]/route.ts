@@ -85,6 +85,11 @@ export async function GET(
     const grouped = SOURCE_TYPES.map((type) => ({
       type,
       items: categorized[type]
+        .sort((a, b) => {
+          const dateA = a.published_at_utc ? new Date(a.published_at_utc).getTime() : 0;
+          const dateB = b.published_at_utc ? new Date(b.published_at_utc).getTime() : 0;
+          return dateB - dateA;
+        })
         .map((s) => ({
           title: lang === "en"
             ? (s.title_en || s.title)

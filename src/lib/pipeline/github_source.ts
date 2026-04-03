@@ -1,7 +1,5 @@
 import type { RssItem } from "./rss";
-
-const GITHUB_QUERY =
-  "llm OR gpt OR agent OR rag OR openai OR anthropic OR gemini OR claude";
+import { buildDynamicQuery } from "./dynamic_query";
 
 interface GithubRepo {
   full_name: string;
@@ -26,11 +24,17 @@ export async function collectGithubItems(
   }
 
   try {
+    const dynamicQuery = await buildDynamicQuery();
+    const githubQuery = dynamicQuery
+      .split(" OR ")
+      .map((t) => t.replace(/^"|"$/g, "").trim().toLowerCase())
+      .join(" OR ");
+
     const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
-    const sinceDate = since.toISOString().slice(0, 10); // YYYY-MM-DD
+    const sinceDate = since.toISOString().slice(0, 10);
 
     const params = new URLSearchParams({
-      q: `${GITHUB_QUERY} pushed:>=${sinceDate}`,
+      q: `${githubQuery} pushed:>=${sinceDate}`,
       sort: "updated",
       order: "desc",
       per_page: "50",

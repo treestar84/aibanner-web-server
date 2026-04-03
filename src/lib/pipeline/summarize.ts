@@ -116,13 +116,20 @@ function parseSummaryResponse(raw: string): SummaryResult {
 
 export async function generateSummaries(
   keyword: string,
-  sources: TavilySource[]
+  sources: TavilySource[],
+  rssContext: Array<{ title: string; snippet: string }> = []
 ): Promise<SummariesResult> {
   const client = new OpenAI();
 
-  const context = sources
+  const rssLines = rssContext
+    .slice(0, 3)
+    .filter((r) => r.title)
+    .map((r) => `- [Original] ${r.title}${r.snippet ? `: ${r.snippet.slice(0, 150)}` : ""}`);
+  const tavilyLines = sources
     .slice(0, SUMMARY_CONTEXT_LIMIT)
-    .map((s) => `- ${s.title}: ${s.snippet}`)
+    .map((s) => `- ${s.title}: ${s.snippet}`);
+  const context = [...rssLines, ...tavilyLines]
+    .slice(0, SUMMARY_CONTEXT_LIMIT + 3)
     .join("\n");
 
   const userMessage = `Keyword: "${keyword}"\n\nRelated news:\n${context}`;

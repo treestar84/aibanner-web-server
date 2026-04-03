@@ -207,6 +207,7 @@ function normalizeKeywordSurface(text: string): string {
   return text
     .normalize("NFKC")
     .trim()
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
     .toLowerCase()
     // qwen3.5 -> qwen 3.5 (버전 표기 토큰 분리)
     .replace(/([a-z])(\d+(?:\.\d+)?)(?=\b)/gi, "$1 $2")
