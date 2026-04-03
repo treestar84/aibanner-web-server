@@ -132,14 +132,26 @@ function dedupeByUrl(sources: TavilySource[]): TavilySource[] {
 
 // ─── Main export (news/social/data 수집 + 재분류) ──────────────────────────────
 
+/**
+ * 키워드를 따옴표로 감싸 exact match를 강화합니다.
+ * 이미 따옴표가 있거나 단일 단어인 경우 그대로 사용합니다.
+ */
+function exactMatchKeyword(keyword: string): string {
+  const trimmed = keyword.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) return trimmed;
+  if (!trimmed.includes(" ")) return trimmed;
+  return `"${trimmed}"`;
+}
+
 export async function collectSources(
   keyword: string
 ): Promise<Record<SourceType, TavilySource[]>> {
   const client = getClient();
+  const exact = exactMatchKeyword(keyword);
 
-  const newsQuery = `${keyword} (news OR blog OR analysis OR article OR interview)`;
-  const socialQuery = `${keyword} (site:threads.net OR site:reddit.com OR site:dev.to OR site:x.com OR site:twitter.com OR site:facebook.com OR site:instagram.com OR site:tiktok.com OR site:clien.net)`;
-  const dataQuery = `${keyword} (site:youtube.com OR site:youtu.be OR site:docs.google.com OR site:drive.google.com OR site:arxiv.org OR site:openreview.net OR filetype:pdf OR dataset OR research paper OR benchmark)`;
+  const newsQuery = `${exact} (news OR blog OR analysis OR article OR interview)`;
+  const socialQuery = `${exact} (site:threads.net OR site:reddit.com OR site:dev.to OR site:x.com OR site:twitter.com OR site:facebook.com OR site:instagram.com OR site:tiktok.com OR site:clien.net)`;
+  const dataQuery = `${exact} (site:youtube.com OR site:youtu.be OR site:docs.google.com OR site:drive.google.com OR site:arxiv.org OR site:openreview.net OR filetype:pdf OR dataset OR research paper OR benchmark)`;
 
   const [newsSeed, socialSeed, dataSeed, broadSeed] = await Promise.all([
     fetchByQuery(client, newsQuery, "news", {
@@ -154,13 +166,15 @@ export async function collectSources(
       maxResults: TAVILY_DATA_RESULTS,
       timeRange: "month",
     }),
-    fetchByQuery(client, keyword, "news", {
+    fetchByQuery(client, exact, "news", {
       maxResults: TAVILY_BROAD_RESULTS,
       timeRange: "month",
     }),
   ]);
 
   const merged = dedupeByUrl([...newsSeed, ...socialSeed, ...dataSeed, ...broadSeed]);
+  const relevant = filterRelevantSources(merged, keyword);
+
   const limits: Record<SourceType, number> = {
     news: TAVILY_NEWS_RESULTS,
     social: TAVILY_SOCIAL_RESULTS,
@@ -172,7 +186,7 @@ export async function collectSources(
     data: [],
   };
 
-  for (const source of merged) {
+  for (const source of relevant) {
     const category = classifySourceCategory(source);
     if (buckets[category].length >= limits[category]) continue;
     buckets[category].push({
@@ -182,4 +196,40 @@ export async function collectSources(
   }
 
   return buckets;
+}
+
+/**
+ * 수집된 소스 중 키워드와 실제 관련 없는 항목을 필터링합니다.
+ * 제목+snippet에 키워드가 exact match로 포함되지 않는 경우,
+ * 단어 재배열/부분 매칭으로 혼동된 결과일 가능성이 높습니다.
+ */
+function filterRelevantSources(
+  sources: TavilySource[],
+  keyword: string
+): TavilySource[] {
+  const kw = keyword.trim().toLowerCase();
+  const kwWords = kw.split(/\s+/);
+
+  // 단일 단어 키워드는 기존 로직으로 충분 (exact match 위험 없음)
+  if (kwWords.length <= 1) return sources;
+
+  return sources.filter((source) => {
+    const text = `${source.title} ${source.snippet}`.toLowerCase();
+
+    // 1) exact match: "mode ai"가 텍스트에 그대로 존재
+    if (text.includes(kw)) return true;
+
+    // 2) 인접 단어 매칭: 키워드 단어들이 가까이(5단어 이내) 위치
+    const textWords = text.split(/\s+/);
+    const firstWordIndexes: number[] = [];
+    for (let i = 0; i < textWords.length; i++) {
+      if (textWords[i].includes(kwWords[0])) firstWordIndexes.push(i);
+    }
+    for (const startIdx of firstWordIndexes) {
+      const window = textWords.slice(startIdx, startIdx + kwWords.length + 3).join(" ");
+      if (kwWords.every((w) => window.includes(w))) return true;
+    }
+
+    return false;
+  });
 }
