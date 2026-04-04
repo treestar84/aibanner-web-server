@@ -22,22 +22,23 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  try {
-    const mode = parsePipelineMode(req.nextUrl.searchParams.get("mode"));
-    const runRetention = req.nextUrl.searchParams.get("retention") === "1";
-    const startedAt = Date.now();
-    const result = await runSnapshotPipeline({ mode });
+  const mode = parsePipelineMode(req.nextUrl.searchParams.get("mode"));
+  const runRetention = req.nextUrl.searchParams.get("retention") === "1";
+  const startedAt = Date.now();
 
-    // YouTube recommend collection
-    let youtubeResult: { inserted: number; skipped: number } | null = null;
-    let youtubeError: string | null = null;
-    try {
-      youtubeResult = await collectAndStoreYoutubeRecommendations();
-      await cleanOldYoutubeVideos();
-    } catch (ytErr) {
-      youtubeError = String(ytErr);
-      console.error("[cron/youtube]", ytErr);
-    }
+  // YouTube recommend collection (independent of snapshot pipeline)
+  let youtubeResult: { inserted: number; skipped: number } | null = null;
+  let youtubeError: string | null = null;
+  try {
+    youtubeResult = await collectAndStoreYoutubeRecommendations();
+    await cleanOldYoutubeVideos();
+  } catch (ytErr) {
+    youtubeError = String(ytErr);
+    console.error("[cron/youtube]", ytErr);
+  }
+
+  try {
+    const result = await runSnapshotPipeline({ mode });
 
     let retention: RetentionRunResult | null = null;
     let retentionError: string | null = null;
@@ -69,7 +70,7 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error("[cron/snapshot]", err);
     return NextResponse.json(
-      { error: "Pipeline failed", detail: String(err) },
+      { error: "Pipeline failed", detail: String(err), youtube: youtubeResult, youtubeError },
       { status: 500 }
     );
   }
