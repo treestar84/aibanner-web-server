@@ -1161,3 +1161,29 @@ export async function upsertRankingWeights(weights: {
 
   return rows[0];
 }
+
+// ─── YouTube Recommend queries ──────────────────────────────────────────────
+
+export interface YouTubeVideo {
+  id: number;
+  video_id: string;
+  channel_id: string;
+  channel_name: string;
+  title: string;
+  thumbnail_url: string;
+  video_url: string;
+  published_at: string;
+  view_count: number | null;
+  like_count: number | null;
+}
+
+export async function getRecentYoutubeVideos(limit = 20): Promise<YouTubeVideo[]> {
+  const rows = await sql`
+    SELECT id, video_id, channel_id, channel_name, title, thumbnail_url, video_url,
+           published_at, view_count, like_count
+    FROM youtube_videos
+    ORDER BY published_at DESC
+    LIMIT ${limit}
+  `;
+  return rows as YouTubeVideo[];
+}

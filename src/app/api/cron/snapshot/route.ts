@@ -5,6 +5,7 @@ import {
   runRetentionPolicy,
   type RetentionRunResult,
 } from "@/lib/pipeline/retention";
+import { collectAndStoreYoutubeRecommendations, cleanOldYoutubeVideos } from "@/lib/pipeline/youtube_recommend_source";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // Hobby 플랜 함수 허용치 내에서 여유 확보
@@ -26,6 +27,18 @@ export async function GET(req: NextRequest) {
     const runRetention = req.nextUrl.searchParams.get("retention") === "1";
     const startedAt = Date.now();
     const result = await runSnapshotPipeline({ mode });
+
+    // YouTube recommend collection
+    let youtubeResult: { inserted: number; skipped: number } | null = null;
+    let youtubeError: string | null = null;
+    try {
+      youtubeResult = await collectAndStoreYoutubeRecommendations();
+      await cleanOldYoutubeVideos();
+    } catch (ytErr) {
+      youtubeError = String(ytErr);
+      console.error("[cron/youtube]", ytErr);
+    }
+
     let retention: RetentionRunResult | null = null;
     let retentionError: string | null = null;
 
@@ -49,6 +62,8 @@ export async function GET(req: NextRequest) {
       retentionExecuted: runRetention,
       retention,
       retentionError,
+      youtube: youtubeResult,
+      youtubeError,
       durationMs,
     });
   } catch (err) {
