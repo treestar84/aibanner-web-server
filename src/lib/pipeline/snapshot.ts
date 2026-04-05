@@ -14,7 +14,7 @@ import { rankKeywords } from "./scoring";
 import type { ScoringProfile } from "./scoring";
 import type { PipelineMode } from "./mode";
 import { collectSources } from "./tavily";
-import { generateSummaries, batchTranslateTitles, classifyKeywordType } from "./summarize";
+import { generateSummaries, batchTranslateTitles, classifyKeywordType, naturalizeKeywordKo } from "./summarize";
 import { batchExtractOgImages } from "./og-parser";
 import { determinePrimaryType, pickPrimarySource } from "./source_category";
 import { resolveScheduleUtc, type ScheduleSlot } from "./schedule";
@@ -436,12 +436,14 @@ async function ensureLocalizedKeyword(
     if (!en) en = fallback;
     const needKoTranslation = !ko || ko === fallback;
     if (needKoTranslation) {
-      // 고유명사(제품/브랜드)는 원문 유지, 일반 개념만 번역
+      // keep: 영문 원문 유지, natural: 자연스러운 한국어 표기, translate: 번역
       const [kwType] = await classifyKeywordType([keyword]);
-      if (kwType === "common") {
+      if (kwType === "translate") {
         ko = (await batchTranslateTitles([keyword], "ko"))[0] ?? fallback;
+      } else if (kwType === "natural") {
+        ko = (await naturalizeKeywordKo([keyword]))[0] ?? fallback;
       } else {
-        ko = fallback;
+        ko = fallback; // keep: 영문 그대로
       }
     }
   }

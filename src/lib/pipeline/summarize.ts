@@ -237,37 +237,95 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
 }
 
 /**
- * 키워드가 고유명사(제품/서비스/브랜드)인지 일반 개념인지 분류합니다.
- * proper → 원문 유지, common → 번역 대상
+ * 키워드의 한국어 표기 방식을 분류합니다.
+ * "keep"   → 영문 원문 그대로 유지 (예: Fluently, GPT-4o, GitHub Copilot)
+ * "natural" → 한국어에서 이미 널리 쓰이는 표기 사용 (예: OpenAI→오픈AI, Google→구글)
+ * "translate" → 일반 개념이므로 한국어 번역 (예: Open Source→오픈소스)
  */
+export type KeywordLocaleAction = "keep" | "natural" | "translate";
+
 export async function classifyKeywordType(
   keywords: string[]
-): Promise<Array<"proper" | "common">> {
+): Promise<KeywordLocaleAction[]> {
   if (keywords.length === 0) return [];
   const client = new OpenAI();
 
-  const prompt = `Classify each keyword as "proper" (product name, brand, service, project name — keep original) or "common" (general concept — translatable).
+  const prompt = `You are classifying AI/tech trending keywords for Korean localization.
+
+For each keyword, decide the best Korean display strategy:
+- "keep": Use the original English form as-is. For product names, brand names, services, tools, model names, or any proper noun where the English form is more recognizable to Korean tech readers. Examples: Fluently, GPT-4o, Claude, Gemini, LangChain, Hugging Face, Perplexity, Cursor, v0, Sora
+- "natural": Use the commonly accepted Korean mixed form that Korean tech communities already use. Only if a well-established Korean convention exists. Examples: OpenAI→오픈AI, Google→구글, Microsoft→마이크로소프트, Open Source→오픈소스, Apple→애플
+- "translate": The keyword is a general concept (not a proper noun) and should be translated to Korean. Examples: AI Regulation→AI 규제, Data Privacy→데이터 프라이버시, Chip War→칩 전쟁
+
+IMPORTANT:
+- When in doubt between "keep" and "natural", prefer "keep" — English is safer for tech terms
+- Model names (Gemma, Llama, Mistral, etc.) should be "keep", NOT transliterated
+- If the keyword looks like it could be a product/service name, choose "keep"
+- Short branded terms or coined words (Fluently, Devin, Manus) are always "keep"
 
 Keywords:
 ${keywords.map((k, i) => `${i + 1}. ${k}`).join("\n")}
 
-Respond with ONLY a JSON array of "proper" or "common", same order. Example: ["proper","common"]`;
+Respond with ONLY a JSON array, same order. Example: ["keep","natural","translate"]`;
 
   try {
     const res = await client.chat.completions.create({
       model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
-      max_tokens: keywords.length * 12,
+      max_tokens: keywords.length * 15,
       temperature: 0,
     });
 
     const raw = (res.choices[0]?.message?.content ?? "").trim();
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length === keywords.length) {
-      return parsed.map((v: string) => (v === "common" ? "common" : "proper"));
+      return parsed.map((v: string) => {
+        if (v === "translate") return "translate";
+        if (v === "natural") return "natural";
+        return "keep";
+      });
     }
   } catch {
-    // 분류 실패 시 안전하게 proper(원문 유지) 처리
+    // 분류 실패 시 안전하게 keep(원문 유지) 처리
   }
-  return keywords.map(() => "proper");
+  return keywords.map(() => "keep");
+}
+
+/**
+ * "natural" 분류된 키워드를 한국어 커뮤니티에서 통용되는 표기로 변환합니다.
+ * 예: OpenAI → 오픈AI, Google → 구글, Open Source → 오픈소스
+ */
+export async function naturalizeKeywordKo(
+  keywords: string[]
+): Promise<string[]> {
+  if (keywords.length === 0) return [];
+  const client = new OpenAI();
+
+  const prompt = `Convert each English tech keyword to the commonly used Korean form in Korean tech communities.
+
+Rules:
+- Use the Korean form that Korean developers/tech readers actually use in everyday conversation
+- Mix Korean and English naturally (e.g., "OpenAI" → "오픈AI", "Open Source" → "오픈소스")
+- Do NOT transliterate model names or product names that are better known in English
+- Output ONLY the Korean forms, one per line, in the same order
+- NO numbering, NO quotes, NO extra text
+
+Keywords:
+${keywords.map((k, i) => `${i + 1}. ${k}`).join("\n")}`;
+
+  try {
+    const response = await client.chat.completions.create({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: keywords.length * 30,
+      temperature: 0,
+    });
+
+    const raw = response.choices[0]?.message?.content ?? "";
+    const lines = parseTranslatedLines(raw);
+    return keywords.map((kw, i) => lines[i] ?? kw);
+  } catch (err) {
+    console.warn(`[summarize] naturalizeKeywordKo failed:`, err);
+    return keywords;
+  }
 }
