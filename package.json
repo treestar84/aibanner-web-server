@@ -6,10 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import tsx --test src/**/*.test.ts",
+    "test": "node --import tsx --test $(find src -type f -name '*.test.ts' | sort)",
     "lint": "next lint",
     "db:migrate": "npx tsx scripts/db/migrate.ts",
-    "admin:hash": "node scripts/admin/generate-admin-password-hash.mjs"
+    "admin:hash": "node scripts/admin/generate-admin-password-hash.mjs",
+    "admin:replay-ranking": "npx tsx scripts/admin/replay-ranking-snapshot.ts"
   },
   "dependencies": {
     "next": "^15.1.7",

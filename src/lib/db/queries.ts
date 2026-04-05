@@ -6,6 +6,11 @@ import {
   normalizeManualKeywordText,
   sanitizeManualKeywordTtlHours,
 } from "@/lib/manual-keywords";
+import {
+  buildYoutubeThumbnailUrl,
+  normalizeManualYoutubeText,
+} from "@/lib/manual-youtube";
+import { buildYoutubeChannelUrl } from "@/lib/youtube-recommend-channels";
 import type { PipelineMode } from "@/lib/pipeline/mode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -117,11 +122,48 @@ interface ManualKeywordRow {
   is_active: boolean;
 }
 
+export interface ManualYoutubeLink {
+  id: number;
+  video_id: string;
+  title: string;
+  channel_name: string;
+  video_url: string;
+  thumbnail_url: string;
+  published_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ManualYoutubeLinkRow extends ManualYoutubeLink {}
+
+export interface YoutubeRecommendChannel {
+  id: number;
+  channel_id: string;
+  channel_name: string;
+  channel_handle: string;
+  channel_url: string;
+  latest_uploaded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface YoutubeRecommendChannelRow extends YoutubeRecommendChannel {}
+
 function toManualKeyword(row: ManualKeywordRow): ManualKeyword {
   return {
     ...row,
     remaining_seconds: Math.max(0, Number(row.remaining_seconds ?? 0)),
   };
+}
+
+function toManualYoutubeLink(row: ManualYoutubeLinkRow): ManualYoutubeLink {
+  return row;
+}
+
+function toYoutubeRecommendChannel(
+  row: YoutubeRecommendChannelRow
+): YoutubeRecommendChannel {
+  return row;
 }
 
 // ─── Manual keyword queries ───────────────────────────────────────────────────
@@ -365,6 +407,356 @@ export async function setManualKeywordEnabled(
 export async function deleteManualKeyword(id: number): Promise<boolean> {
   const rows = (await sql`
     DELETE FROM manual_keywords
+    WHERE id = ${id}
+    RETURNING id
+  `) as { id: number }[];
+
+  return rows.length > 0;
+}
+
+// ─── Manual YouTube link queries ──────────────────────────────────────────────
+
+export async function listManualYoutubeLinks(): Promise<ManualYoutubeLink[]> {
+  const rows = (await sql`
+    SELECT
+      id,
+      video_id,
+      title,
+      channel_name,
+      video_url,
+      thumbnail_url,
+      published_at,
+      created_at,
+      updated_at
+    FROM manual_youtube_links
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 300
+  `) as ManualYoutubeLinkRow[];
+
+  return rows.map(toManualYoutubeLink);
+}
+
+export async function getManualYoutubeLinkById(id: number): Promise<ManualYoutubeLink | null> {
+  const rows = (await sql`
+    SELECT
+      id,
+      video_id,
+      title,
+      channel_name,
+      video_url,
+      thumbnail_url,
+      published_at,
+      created_at,
+      updated_at
+    FROM manual_youtube_links
+    WHERE id = ${id}
+    LIMIT 1
+  `) as ManualYoutubeLinkRow[];
+
+  return rows[0] ? toManualYoutubeLink(rows[0]) : null;
+}
+
+export async function upsertManualYoutubeLink(input: {
+  videoId: string;
+  title: string;
+  channelName?: string;
+  videoUrl: string;
+  publishedAt: string;
+}): Promise<ManualYoutubeLink> {
+  const videoId = input.videoId.trim();
+  const title = normalizeManualYoutubeText(input.title);
+  const channelName = normalizeManualYoutubeText(input.channelName ?? "");
+  const videoUrl = input.videoUrl.trim();
+  const publishedAt = input.publishedAt;
+
+  if (!videoId) throw new Error("videoId is required");
+  if (!title) throw new Error("title is required");
+  if (!videoUrl) throw new Error("videoUrl is required");
+  if (!publishedAt) throw new Error("publishedAt is required");
+
+  const thumbnailUrl = buildYoutubeThumbnailUrl(videoId);
+
+  const rows = (await sql`
+    INSERT INTO manual_youtube_links (
+      video_id,
+      title,
+      channel_name,
+      video_url,
+      thumbnail_url,
+      published_at,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${videoId},
+      ${title},
+      ${channelName},
+      ${videoUrl},
+      ${thumbnailUrl},
+      ${publishedAt},
+      NOW(),
+      NOW()
+    )
+    ON CONFLICT (video_id) DO UPDATE
+    SET
+      title = EXCLUDED.title,
+      channel_name = EXCLUDED.channel_name,
+      video_url = EXCLUDED.video_url,
+      thumbnail_url = EXCLUDED.thumbnail_url,
+      published_at = EXCLUDED.published_at,
+      updated_at = NOW()
+    RETURNING
+      id,
+      video_id,
+      title,
+      channel_name,
+      video_url,
+      thumbnail_url,
+      published_at,
+      created_at,
+      updated_at
+  `) as ManualYoutubeLinkRow[];
+
+  return toManualYoutubeLink(rows[0]);
+}
+
+export async function updateManualYoutubeLink(
+  id: number,
+  input: {
+    videoId: string;
+    title: string;
+    channelName?: string;
+    videoUrl: string;
+    publishedAt: string;
+  }
+): Promise<ManualYoutubeLink | null> {
+  const current = await getManualYoutubeLinkById(id);
+  if (!current) return null;
+
+  const videoId = input.videoId.trim();
+  const title = normalizeManualYoutubeText(input.title);
+  const channelName = normalizeManualYoutubeText(input.channelName ?? "");
+  const videoUrl = input.videoUrl.trim();
+  const publishedAt = input.publishedAt;
+
+  if (!videoId) throw new Error("videoId is required");
+  if (!title) throw new Error("title is required");
+  if (!videoUrl) throw new Error("videoUrl is required");
+  if (!publishedAt) throw new Error("publishedAt is required");
+
+  const conflictRows = (await sql`
+    SELECT id
+    FROM manual_youtube_links
+    WHERE video_id = ${videoId}
+      AND id <> ${id}
+    LIMIT 1
+  `) as { id: number }[];
+  if (conflictRows[0]) {
+    throw new Error("이미 등록된 YouTube 영상입니다.");
+  }
+
+  const rows = (await sql`
+    UPDATE manual_youtube_links
+    SET
+      video_id = ${videoId},
+      title = ${title},
+      channel_name = ${channelName},
+      video_url = ${videoUrl},
+      thumbnail_url = ${buildYoutubeThumbnailUrl(videoId)},
+      published_at = ${publishedAt},
+      updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING
+      id,
+      video_id,
+      title,
+      channel_name,
+      video_url,
+      thumbnail_url,
+      published_at,
+      created_at,
+      updated_at
+  `) as ManualYoutubeLinkRow[];
+
+  return rows[0] ? toManualYoutubeLink(rows[0]) : null;
+}
+
+export async function deleteManualYoutubeLink(id: number): Promise<boolean> {
+  const rows = (await sql`
+    DELETE FROM manual_youtube_links
+    WHERE id = ${id}
+    RETURNING id
+  `) as { id: number }[];
+
+  return rows.length > 0;
+}
+
+// ─── YouTube recommend channel queries ───────────────────────────────────────
+
+export async function listYoutubeRecommendChannels(): Promise<YoutubeRecommendChannel[]> {
+  const rows = (await sql`
+    SELECT
+      yrc.id,
+      yrc.channel_id,
+      yrc.channel_name,
+      yrc.channel_handle,
+      yrc.channel_url,
+      latest_video.latest_uploaded_at,
+      yrc.created_at,
+      yrc.updated_at
+    FROM youtube_recommend_channels yrc
+    LEFT JOIN (
+      SELECT
+        channel_id,
+        MAX(published_at) AS latest_uploaded_at
+      FROM youtube_videos
+      GROUP BY channel_id
+    ) latest_video
+      ON latest_video.channel_id = yrc.channel_id
+    ORDER BY yrc.updated_at DESC, yrc.id DESC
+    LIMIT 300
+  `) as YoutubeRecommendChannelRow[];
+
+  return rows.map(toYoutubeRecommendChannel);
+}
+
+export async function getYoutubeRecommendChannelById(
+  id: number
+): Promise<YoutubeRecommendChannel | null> {
+  const rows = (await sql`
+    SELECT
+      yrc.id,
+      yrc.channel_id,
+      yrc.channel_name,
+      yrc.channel_handle,
+      yrc.channel_url,
+      (
+        SELECT MAX(yv.published_at)
+        FROM youtube_videos yv
+        WHERE yv.channel_id = yrc.channel_id
+      ) AS latest_uploaded_at,
+      yrc.created_at,
+      yrc.updated_at
+    FROM youtube_recommend_channels yrc
+    WHERE yrc.id = ${id}
+    LIMIT 1
+  `) as YoutubeRecommendChannelRow[];
+
+  return rows[0] ? toYoutubeRecommendChannel(rows[0]) : null;
+}
+
+export async function upsertYoutubeRecommendChannel(input: {
+  channelId: string;
+  channelName: string;
+  channelHandle?: string;
+  channelUrl?: string;
+}): Promise<YoutubeRecommendChannel> {
+  const channelId = input.channelId.trim();
+  const channelName = normalizeManualYoutubeText(input.channelName);
+  const channelHandle = normalizeManualYoutubeText(input.channelHandle ?? "");
+  const channelUrl = (input.channelUrl?.trim() ||
+    buildYoutubeChannelUrl(channelId, channelHandle));
+
+  if (!channelId) throw new Error("channelId is required");
+  if (!channelName) throw new Error("channelName is required");
+  if (!channelUrl) throw new Error("channelUrl is required");
+
+  const rows = (await sql`
+    INSERT INTO youtube_recommend_channels (
+      channel_id,
+      channel_name,
+      channel_handle,
+      channel_url,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${channelId},
+      ${channelName},
+      ${channelHandle},
+      ${channelUrl},
+      NOW(),
+      NOW()
+    )
+    ON CONFLICT (channel_id) DO UPDATE
+    SET
+      channel_name = EXCLUDED.channel_name,
+      channel_handle = EXCLUDED.channel_handle,
+      channel_url = EXCLUDED.channel_url,
+      updated_at = NOW()
+    RETURNING
+      id,
+      channel_id,
+      channel_name,
+      channel_handle,
+      channel_url,
+      NULL::timestamptz AS latest_uploaded_at,
+      created_at,
+      updated_at
+  `) as YoutubeRecommendChannelRow[];
+
+  return toYoutubeRecommendChannel(rows[0]);
+}
+
+export async function updateYoutubeRecommendChannel(
+  id: number,
+  input: {
+    channelId: string;
+    channelName: string;
+    channelHandle?: string;
+    channelUrl?: string;
+  }
+): Promise<YoutubeRecommendChannel | null> {
+  const current = await getYoutubeRecommendChannelById(id);
+  if (!current) return null;
+
+  const channelId = input.channelId.trim();
+  const channelName = normalizeManualYoutubeText(input.channelName);
+  const channelHandle = normalizeManualYoutubeText(input.channelHandle ?? "");
+  const channelUrl = (input.channelUrl?.trim() ||
+    buildYoutubeChannelUrl(channelId, channelHandle));
+
+  if (!channelId) throw new Error("channelId is required");
+  if (!channelName) throw new Error("channelName is required");
+  if (!channelUrl) throw new Error("channelUrl is required");
+
+  const conflictRows = (await sql`
+    SELECT id
+    FROM youtube_recommend_channels
+    WHERE channel_id = ${channelId}
+      AND id <> ${id}
+    LIMIT 1
+  `) as { id: number }[];
+  if (conflictRows[0]) {
+    throw new Error("이미 등록된 YouTube 채널입니다.");
+  }
+
+  const rows = (await sql`
+    UPDATE youtube_recommend_channels
+    SET
+      channel_id = ${channelId},
+      channel_name = ${channelName},
+      channel_handle = ${channelHandle},
+      channel_url = ${channelUrl},
+      updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING
+      id,
+      channel_id,
+      channel_name,
+      channel_handle,
+      channel_url,
+      NULL::timestamptz AS latest_uploaded_at,
+      created_at,
+      updated_at
+  `) as YoutubeRecommendChannelRow[];
+
+  return rows[0] ? toYoutubeRecommendChannel(rows[0]) : null;
+}
+
+export async function deleteYoutubeRecommendChannel(id: number): Promise<boolean> {
+  const rows = (await sql`
+    DELETE FROM youtube_recommend_channels
     WHERE id = ${id}
     RETURNING id
   `) as { id: number }[];
@@ -1186,4 +1578,21 @@ export async function getRecentYoutubeVideos(limit = 20): Promise<YouTubeVideo[]
     LIMIT ${limit}
   `;
   return rows as YouTubeVideo[];
+}
+
+export async function getYoutubeVideoByVideoId(
+  videoId: string
+): Promise<YouTubeVideo | null> {
+  const normalized = videoId.trim();
+  if (!normalized) return null;
+
+  const rows = await sql`
+    SELECT id, video_id, channel_id, channel_name, title, thumbnail_url, video_url,
+           published_at, view_count, like_count
+    FROM youtube_videos
+    WHERE video_id = ${normalized}
+    LIMIT 1
+  `;
+
+  return (rows as YouTubeVideo[])[0] ?? null;
 }

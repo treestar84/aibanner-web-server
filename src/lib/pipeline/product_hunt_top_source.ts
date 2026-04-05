@@ -241,6 +241,10 @@ export async function collectProductHuntTopItems(
         tier: "P1_CONTEXT" as const,
         lang: "en",
         rankingSignals: [rankingSignal],
+        engagement: {
+          score: post.votesCount,
+          comments: 0,
+        },
       } satisfies RssItem;
     });
 

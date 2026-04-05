@@ -85,6 +85,7 @@ export async function PUT(req: NextRequest) {
       frequency?: unknown;
       authority?: unknown;
       velocity?: unknown;
+      engagement?: unknown;
       internal?: unknown;
     } | null;
 
@@ -103,12 +104,17 @@ export async function PUT(req: NextRequest) {
       return parseFloat(num.toFixed(4));
     };
 
+    const currentWeights = await getRankingWeights();
     const weights = {
       w_recency: parseWeight(body.recency, "recency"),
       w_frequency: parseWeight(body.frequency, "frequency"),
       w_authority: parseWeight(body.authority, "authority"),
       w_velocity: parseWeight(body.velocity, "velocity"),
-      w_internal: parseWeight(body.internal, "internal"),
+      w_engagement: parseWeight(body.engagement, "engagement"),
+      w_internal:
+        body.internal == null
+          ? currentWeights.w_internal
+          : parseWeight(body.internal, "internal"),
     };
 
     const saved = await upsertRankingWeights(weights);

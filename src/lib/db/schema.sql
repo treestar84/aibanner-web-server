@@ -228,6 +228,76 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_manual_keywords_mode_keyword_lower
   ON manual_keywords(mode, lower(keyword));
 
 -- ============================================================
+-- manual_youtube_links: 관리자 수동 유튜브 링크 큐레이션
+-- ============================================================
+CREATE TABLE IF NOT EXISTS manual_youtube_links (
+  id            SERIAL      PRIMARY KEY,
+  video_id      TEXT        NOT NULL,
+  title         TEXT        NOT NULL,
+  channel_name  TEXT        NOT NULL DEFAULT '',
+  video_url     TEXT        NOT NULL,
+  thumbnail_url TEXT        NOT NULL,
+  published_at  TIMESTAMPTZ NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_manual_youtube_links_video_id
+  ON manual_youtube_links(video_id);
+
+CREATE INDEX IF NOT EXISTS idx_manual_youtube_links_updated_at
+  ON manual_youtube_links(updated_at DESC, id DESC);
+
+-- ============================================================
+-- youtube_recommend_channels: 유튜브 추천 수집 채널 목록
+-- ============================================================
+CREATE TABLE IF NOT EXISTS youtube_recommend_channels (
+  id             SERIAL      PRIMARY KEY,
+  channel_id     TEXT        NOT NULL,
+  channel_name   TEXT        NOT NULL,
+  channel_handle TEXT        NOT NULL DEFAULT '',
+  channel_url    TEXT        NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_youtube_recommend_channels_channel_id
+  ON youtube_recommend_channels(channel_id);
+
+CREATE INDEX IF NOT EXISTS idx_youtube_recommend_channels_updated_at
+  ON youtube_recommend_channels(updated_at DESC, id DESC);
+
+INSERT INTO youtube_recommend_channels (channel_id, channel_name, channel_handle, channel_url)
+VALUES
+  ('UCQNE2JmbasNYbjGAcuBiRRg', '조코딩 JoCoding', '@JoCoding', 'https://www.youtube.com/@JoCoding'),
+  ('UCxj3eVTAv9KLdrowXcuCFDQ', '빌더 조쉬 Builder Josh', '@builderJosh', 'https://www.youtube.com/@builderJosh'),
+  ('UCxZ2AlaT0hOmxzZVbF_j_Sw', '코드팩토리', '@codefactory', 'https://www.youtube.com/@codefactory'),
+  ('UC6xro-nRXlpa4A5UoeFKUDA', '커서맛피아', '@cursormafia', 'https://www.youtube.com/@cursormafia'),
+  ('UCztt42h03X49HFRGW9--Bhg', 'AI 보좌관', '@aiadjunct', 'https://www.youtube.com/@aiadjunct'),
+  ('UCLR3sD0KB_dWpvcsrLP0aUg', '오늘코드', '@todaycode', 'https://www.youtube.com/@todaycode'),
+  ('UCGU_CgteEqNSjiXcF0QfaKg', '데이터팝콘', '@data.popcorn', 'https://www.youtube.com/@data.popcorn'),
+  ('UCifUR1eEHhhXxK_Q_XoArPQ', '큐제이씨', '@qjc_qjc', 'https://www.youtube.com/@qjc_qjc'),
+  ('UC86HxrAQ4GS1Iq8LIvUYigQ', '소스놀이터', '@sourcePlayground', 'https://www.youtube.com/@sourcePlayground'),
+  ('UCZ4mb62ECiTMw8DcbBcMLmA', '엔드플랜', '@ENDPLAN', 'https://www.youtube.com/@ENDPLAN'),
+  ('UCA6KbBMswPWk6sMTVxDa5xg', '텐빌더', '@ten-builder', 'https://www.youtube.com/@ten-builder'),
+  ('UC6VbqOLKkdDhdtnhuTYPKxA', 'SV 개발자', '@sv.developer', 'https://www.youtube.com/@sv.developer'),
+  ('UCZ30aWiMw5C8mGcESlAGQbA', '짐코딩', '@gymcoding', 'https://www.youtube.com/@gymcoding'),
+  ('UCeN2YeJcBCRJoXgzF_OU3qw', '언리얼테크', '@unrealtech', 'https://www.youtube.com/@unrealtech'),
+  ('UCFmYIak2sRBXt2M3ep6U3QA', '제이초이', '@jayychoii', 'https://www.youtube.com/@jayychoii'),
+  ('UC0WxGJnTB_04ViIrxPvFRmg', '메이커에반', '@maker-evan', 'https://www.youtube.com/@maker-evan'),
+  ('UC1_ZZYZsHh2_DzCXN4VGVcQ', '개발동생', '@개발동생', 'https://www.youtube.com/@개발동생'),
+  ('UCqeurGTkc3KXeEcBO4S_Jyw', '코난쌤 conanssam', '@conanssam', 'https://www.youtube.com/@conanssam'),
+  ('UCSHbj8-YcdasMzqRzn_mHGA', '아이티커넥트', '@itconnect_dev', 'https://www.youtube.com/@itconnect_dev'),
+  ('UCScI4bsr-RaGdYSC2QAHWug', '하울 바이브 코딩', '@howl_vibe', 'https://www.youtube.com/@howl_vibe'),
+  ('UCDLlMjELbrJdETmSiAB68AA', '시민개발자 구씨', '@citizendev9c', 'https://www.youtube.com/@citizendev9c'),
+  ('UCSOYuo3uOG3GCUFIeB4or7A', 'AISchool', '@aischool_ai', 'https://www.youtube.com/@aischool_ai'),
+  ('UCqJNohiUt7qgGpKQh0O5yrQ', '잇다방 ITdabang', '@itdabang', 'https://www.youtube.com/@itdabang'),
+  ('UCouEEn-xhyTN9K6wSXjBbVQ', 'AI싱크클럽', '@AISyncClub', 'https://www.youtube.com/@AISyncClub'),
+  ('UCfZCgp-n4yLLEaX6E30Xh4w', '대모산 개발단', '@대모산개발단', 'https://www.youtube.com/@대모산개발단'),
+  ('UCXKXULkq--aSgzScYeLYJog', '단테랩스', '@dante-labs', 'https://www.youtube.com/@dante-labs')
+ON CONFLICT (channel_id) DO NOTHING;
+
+-- ============================================================
 -- source_ingestion_state: 소스별 증분 수집 상태 저장
 -- ============================================================
 CREATE TABLE IF NOT EXISTS source_ingestion_state (

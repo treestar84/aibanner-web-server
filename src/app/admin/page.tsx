@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { YoutubeSourceChannelsPanel } from "./youtube-source-channels-panel";
 import {
   buildManualKeywordFeedback,
   type ManualKeywordFeedback,
@@ -119,13 +120,6 @@ export default function AdminPage() {
     loadItems();
   }, [loadItems]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      loadItems();
-    }, 30000);
-    return () => window.clearInterval(timer);
-  }, [loadItems]);
-
   const activeCount = useMemo(
     () => items.filter((item) => item.enabled && item.is_active).length,
     [items]
@@ -239,9 +233,12 @@ export default function AdminPage() {
       <section className="max-w-5xl mx-auto">
         <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-black tracking-tight">관리자 · 수동 키워드</h1>
+            <h1 className="text-2xl font-black tracking-tight">관리자 · 수동 큐레이션</h1>
             <p className="text-sm text-zinc-400 mt-2">
               등록된 수동 키워드는 파이프라인에서 강제 포함되어 상단 노출 우선순위를 갖습니다.
+            </p>
+            <p className="text-sm text-zinc-500 mt-1">
+              아래에서 유튜브 추천 수집에 사용하는 채널 목록도 함께 관리할 수 있습니다.
             </p>
             <a
               href="/admin/ranking-simulator"
@@ -432,6 +429,8 @@ export default function AdminPage() {
             ))}
           </ul>
         )}
+
+        <YoutubeSourceChannelsPanel />
       </section>
     </main>
   );

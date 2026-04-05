@@ -1,28 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-
-interface Candidate {
-  snapshot_id: string;
-  keyword: string;
-  keyword_normalized: string;
-  score_recency: number;
-  score_frequency: number;
-  score_authority: number;
-  score_velocity: number;
-  score_internal: number;
-  total_score: number;
-  source_count: number;
-  top_source_title: string | null;
-  top_source_domain: string | null;
-  is_manual: boolean;
-}
+import {
+  recalculateRankingCandidates,
+  type RankingSimulatorCandidate,
+  type RankingSimulatorWeights,
+  type RankingSimulatorResult,
+} from "@/lib/admin/ranking_simulator";
 
 interface Weights {
   w_recency: number;
   w_frequency: number;
   w_authority: number;
   w_velocity: number;
+  w_engagement: number;
   w_internal: number;
   updated_at: string;
 }
@@ -34,19 +25,11 @@ interface SnapshotInfo {
 }
 
 interface SimulatorData {
-  candidates: Candidate[];
+  candidates: RankingSimulatorCandidate[];
   weights: Weights;
   snapshotId: string | null;
   updatedAt: string | null;
   recentSnapshots: SnapshotInfo[];
-}
-
-interface SimWeights {
-  recency: number;
-  frequency: number;
-  authority: number;
-  velocity: number;
-  internal: number;
 }
 
 function formatKst(iso: string): string {
@@ -61,41 +44,27 @@ function formatKst(iso: string): string {
   });
 }
 
-function recalculate(
-  candidates: Candidate[],
-  weights: SimWeights
-): Array<Candidate & { simTotal: number; simRank: number; origRank: number }> {
-  // 원래 순위 기록
-  const sorted = [...candidates]
-    .sort((a, b) => b.total_score - a.total_score)
-    .map((c, i) => ({ ...c, origRank: i + 1 }));
-
-  // 시뮬레이션 점수 계산
-  const withSim = sorted.map((c) => ({
-    ...c,
-    simTotal: parseFloat(
-      (
-        c.score_recency * weights.recency +
-        c.score_frequency * weights.frequency +
-        c.score_authority * weights.authority +
-        c.score_velocity * weights.velocity +
-        c.score_internal * weights.internal
-      ).toFixed(4)
-    ),
-  }));
-
-  // 시뮬레이션 점수로 재정렬
-  withSim.sort((a, b) => b.simTotal - a.simTotal);
-
-  return withSim.map((c, i) => ({ ...c, simRank: i + 1 }));
-}
-
 function RankDelta({ orig, sim }: { orig: number; sim: number }) {
   const diff = orig - sim; // 양수 = 상승
   if (diff === 0) return <span className="text-zinc-500">-</span>;
   if (diff > 0)
     return <span className="text-emerald-400 font-bold">▲{diff}</span>;
   return <span className="text-red-400 font-bold">▼{Math.abs(diff)}</span>;
+}
+
+function formatReasonLabel(reason: string | null): string {
+  if (!reason) return "-";
+  return reason
+    .split(",")
+    .map((part) => {
+      const token = part.trim();
+      if (token === "policy") return "정책";
+      if (token === "stability") return "안정화";
+      if (token === "manual_boost") return "수동 부스트";
+      if (token === "manual_insert") return "수동 삽입";
+      return token;
+    })
+    .join(", ");
 }
 
 export default function RankingSimulatorPage() {
@@ -107,16 +76,16 @@ export default function RankingSimulatorPage() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   // 시뮬레이션 가중치 (슬라이더용)
-  const [simWeights, setSimWeights] = useState<SimWeights>({
+  const [simWeights, setSimWeights] = useState<RankingSimulatorWeights>({
     recency: 0.42,
     frequency: 0.16,
     authority: 0.10,
     velocity: 0.32,
-    internal: 0.00,
+    engagement: 0.22,
   });
 
   // 서버 저장 가중치 (리셋용)
-  const [serverWeights, setServerWeights] = useState<SimWeights>(simWeights);
+  const [serverWeights, setServerWeights] = useState<RankingSimulatorWeights>(simWeights);
 
   const loadData = useCallback(
     async (snapshotId?: string) => {
@@ -134,12 +103,12 @@ export default function RankingSimulatorPage() {
           setSelectedSnapshot(json.snapshotId);
         }
         if (json.weights) {
-          const w: SimWeights = {
+          const w: RankingSimulatorWeights = {
             recency: json.weights.w_recency,
             frequency: json.weights.w_frequency,
             authority: json.weights.w_authority,
             velocity: json.weights.w_velocity,
-            internal: json.weights.w_internal,
+            engagement: json.weights.w_engagement,
           };
           setSimWeights(w);
           setServerWeights(w);
@@ -164,7 +133,7 @@ export default function RankingSimulatorPage() {
     loadData(snapshotId);
   };
 
-  const handleWeightChange = (key: keyof SimWeights, value: number) => {
+  const handleWeightChange = (key: keyof RankingSimulatorWeights, value: number) => {
     setSimWeights((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -206,15 +175,15 @@ export default function RankingSimulatorPage() {
           simWeights.frequency +
           simWeights.authority +
           simWeights.velocity +
-          simWeights.internal
+          simWeights.engagement
         ).toFixed(4)
       ),
     [simWeights]
   );
 
-  const simulatedCandidates = useMemo(() => {
+  const simulatedCandidates = useMemo<RankingSimulatorResult[]>(() => {
     if (!data?.candidates?.length) return [];
-    return recalculate(data.candidates, simWeights);
+    return recalculateRankingCandidates(data.candidates, simWeights);
   }, [data?.candidates, simWeights]);
 
   const isModified = useMemo(() => {
@@ -223,16 +192,16 @@ export default function RankingSimulatorPage() {
       simWeights.frequency !== serverWeights.frequency ||
       simWeights.authority !== serverWeights.authority ||
       simWeights.velocity !== serverWeights.velocity ||
-      simWeights.internal !== serverWeights.internal
+      simWeights.engagement !== serverWeights.engagement
     );
   }, [simWeights, serverWeights]);
 
-  const WEIGHT_KEYS: Array<{ key: keyof SimWeights; label: string; color: string }> = [
-    { key: "recency", label: "Recency", color: "accent-blue-400" },
-    { key: "frequency", label: "Frequency", color: "accent-purple-400" },
-    { key: "authority", label: "Authority", color: "accent-amber-400" },
-    { key: "velocity", label: "Velocity", color: "accent-emerald-400" },
-    { key: "internal", label: "Internal", color: "accent-red-400" },
+  const WEIGHT_KEYS: Array<{ key: keyof RankingSimulatorWeights; label: string }> = [
+    { key: "recency", label: "Recency" },
+    { key: "frequency", label: "Frequency" },
+    { key: "authority", label: "Authority" },
+    { key: "velocity", label: "Velocity" },
+    { key: "engagement", label: "Engagement" },
   ];
 
   return (
@@ -254,7 +223,7 @@ export default function RankingSimulatorPage() {
             </h1>
             <p className="text-sm text-zinc-400 mt-1">
               가중치를 조절하여 키워드 랭킹 변화를 시뮬레이션합니다.
-              적용 버튼으로 다음 파이프라인에 반영할 수 있습니다.
+              내부 보정값은 고정 additive bonus로 처리되며, 아래 슬라이더는 기본 스코어만 조절합니다.
             </p>
           </div>
 
@@ -371,11 +340,14 @@ export default function RankingSimulatorPage() {
                   <th className="px-3 py-3 text-right w-16">F</th>
                   <th className="px-3 py-3 text-right w-16">A</th>
                   <th className="px-3 py-3 text-right w-16">V</th>
-                  <th className="px-3 py-3 text-right w-16">I</th>
+                  <th className="px-3 py-3 text-right w-16">E</th>
+                  <th className="px-3 py-3 text-right w-16">고정</th>
                   <th className="px-3 py-3 text-right w-20">가중합</th>
                   <th className="px-3 py-3 text-right w-16">원본</th>
                   <th className="px-3 py-3 text-right w-14">출처</th>
                   <th className="px-3 py-3 text-left">도메인</th>
+                  <th className="px-3 py-3 text-left">패밀리</th>
+                  <th className="px-3 py-3 text-left">보정</th>
                 </tr>
               </thead>
               <tbody>
@@ -399,6 +371,10 @@ export default function RankingSimulatorPage() {
                           수동
                         </span>
                       )}
+                      <div className="mt-1 text-[11px] text-zinc-500">
+                        {c.keyword_kind ?? "-"}
+                        {c.version_kind ? ` · ${c.version_kind}` : ""}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-xs text-zinc-300">
                       {c.score_recency.toFixed(3)}
@@ -411,6 +387,9 @@ export default function RankingSimulatorPage() {
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-xs text-zinc-300">
                       {c.score_velocity.toFixed(3)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-xs text-zinc-300">
+                      {c.score_engagement.toFixed(3)}
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-xs text-zinc-300">
                       {c.score_internal.toFixed(3)}
@@ -426,6 +405,18 @@ export default function RankingSimulatorPage() {
                     </td>
                     <td className="px-3 py-2 text-xs text-zinc-500 truncate max-w-[120px]">
                       {c.top_source_domain ?? "-"}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-zinc-500">
+                      <div>{c.family_label ?? "-"}</div>
+                      <div className="text-[11px] text-zinc-600">
+                        {c.family_source ?? "-"}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-zinc-400">
+                      <div>{formatReasonLabel(c.internal_reason)}</div>
+                      <div className="text-[11px] text-zinc-600 font-mono">
+                        p {c.policy_delta.toFixed(2)} / s {c.stability_delta.toFixed(2)} / m {c.manual_delta.toFixed(2)}
+                      </div>
                     </td>
                   </tr>
                 ))}

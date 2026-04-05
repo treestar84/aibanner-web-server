@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { ProductHuntPost } from "@/lib/pipeline/product_hunt_top_source";
 import {
+  collectProductHuntTopItems,
   getPacificDateKey,
   isCurrentPacificTopLaunch,
   resolveProductHuntRankingSignal,
@@ -56,4 +57,47 @@ test("isCurrentPacificTopLaunch requires same Pacific day and a valid daily rank
 
   assert.equal(isCurrentPacificTopLaunch(post, "2026-03-20"), true);
   assert.equal(isCurrentPacificTopLaunch(post, "2026-03-21"), false);
+});
+
+test("collectProductHuntTopItems maps votesCount into engagement score", async () => {
+  const originalToken = process.env.PRODUCT_HUNT_TOKEN;
+  const originalFetch = global.fetch;
+  process.env.PRODUCT_HUNT_TOKEN = "test-token";
+
+  global.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        data: {
+          posts: {
+            nodes: [
+              {
+                id: "1",
+                name: "Google Gemini Memory Import",
+                tagline: "Bring your chat history into Gemini",
+                url: "https://www.producthunt.com/posts/google-gemini-memory-import",
+                website: "https://gemini.google.com",
+                featuredAt: new Date().toISOString(),
+                createdAt: new Date().toISOString(),
+                dailyRank: 2,
+                votesCount: 412,
+                topics: {
+                  edges: [{ node: { slug: "ai", name: "AI" } }],
+                },
+              },
+            ],
+          },
+        },
+      }),
+      { status: 200 }
+    );
+
+  try {
+    const items = await collectProductHuntTopItems(72);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].engagement?.score, 412);
+    assert.equal(items[0].engagement?.comments, 0);
+  } finally {
+    process.env.PRODUCT_HUNT_TOKEN = originalToken;
+    global.fetch = originalFetch;
+  }
 });
