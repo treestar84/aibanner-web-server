@@ -48,6 +48,8 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { url: "https://papers.takara.ai/api/feed", title: "HF Daily Papers (Takara)", tier: "P0_CURATED", lang: "en" },
   // 뉴스레터 (큐레이션)
   { url: "https://www.bensbites.com/feed", title: "Ben's Bites", tier: "P0_CURATED", lang: "en" },
+  // 개발 플랫폼 공식 블로그
+  { url: "https://github.blog/feed/", title: "GitHub Blog", tier: "P0_CURATED", lang: "en" },
 
   // ── P1_CONTEXT: AI 뉴스/분석/체인지로그 ───────────────────────────────────
   { url: "https://techcrunch.com/category/artificial-intelligence/feed/", title: "TechCrunch AI", tier: "P1_CONTEXT", lang: "en" },
@@ -70,14 +72,26 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { url: "https://blog.logrocket.com/feed/", title: "LogRocket Blog", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://www.phoronix.com/rss.php", title: "Phoronix", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://www.producthunt.com/feed", title: "Product Hunt", tier: "P1_CONTEXT", lang: "en" },
+  // 앱/에이전트/배포 생태계
+  { url: "https://vercel.com/atom", title: "Vercel Blog", tier: "P1_CONTEXT", lang: "en" },
+  // 코드 인텔리전스/Cody
+  { url: "https://sourcegraph.com/blog/rss.xml", title: "Sourcegraph Blog", tier: "P1_CONTEXT", lang: "en" },
+  // AI 실전 분석/교육
+  { url: "https://sebastianraschka.com/rss_feed.xml", title: "Sebastian Raschka", tier: "P1_CONTEXT", lang: "en" },
+  // 개발자 업계 분석
+  { url: "https://newsletter.pragmaticengineer.com/feed", title: "The Pragmatic Engineer", tier: "P1_CONTEXT", lang: "en" },
+  // AI 코딩/에이전트 블로그
+  { url: "https://baoyu.io/feed.xml", title: "宝玉", tier: "P1_CONTEXT", lang: "en" },
 
   // ── P2_RAW: 한국어 AI 뉴스 ────────────────────────────────────────────────
-  { url: "https://www.aitimes.com/rss/allArticle.xml", title: "AI타임스", tier: "P2_RAW", lang: "ko" },
-  { url: "https://www.etnews.com/rss/section.xml?id=150", title: "전자신문 AI", tier: "P2_RAW", lang: "ko" },
+  // AI타임스: 2026-04-09 기준 RSS 404 → 제거
+  // 전자신문 AI: 2026-04-09 기준 WAF 차단 → 제거
   { url: "https://zdnet.co.kr/rss/news.xml", title: "ZDNet Korea", tier: "P2_RAW", lang: "ko" },
 
   // ── COMMUNITY: Dev.to, HN (Reddit은 reddit_source.ts에서 JSON API로 수집) ──
   { url: "https://dev.to/feed/tag/ai", title: "Dev.to AI", tier: "COMMUNITY", lang: "en" },
+  { url: "https://dev.to/feed/tag/vibecoding", title: "Dev.to Vibe Coding", tier: "COMMUNITY", lang: "en" },
+  { url: "https://towardsai.net/feed", title: "Towards AI", tier: "COMMUNITY", lang: "en" },
   { url: "https://hnrss.org/newest?q=LLM+AI", title: "HackerNews AI", tier: "COMMUNITY", lang: "en" },
 ];
 
