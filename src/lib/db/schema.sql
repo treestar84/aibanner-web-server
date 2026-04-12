@@ -355,3 +355,31 @@ CREATE TABLE IF NOT EXISTS ranking_weights (
 );
 
 INSERT INTO ranking_weights (id) VALUES (1) ON CONFLICT DO NOTHING;
+
+-- ============================================================
+-- promo_contents: 프로모션 카드 콘텐츠 (관리자 등록)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS promo_contents (
+  id             SERIAL      PRIMARY KEY,
+  slug           TEXT        UNIQUE NOT NULL,
+  tag            TEXT        NOT NULL DEFAULT 'INFO',
+  tag_color      TEXT        NOT NULL DEFAULT '#7C3AED',
+  title_ko       TEXT        NOT NULL,
+  title_en       TEXT        NOT NULL,
+  subtitle_ko    TEXT        NOT NULL DEFAULT '',
+  subtitle_en    TEXT        NOT NULL DEFAULT '',
+  body_ko        TEXT        NOT NULL DEFAULT '',
+  body_en        TEXT        NOT NULL DEFAULT '',
+  image_url      TEXT        NOT NULL DEFAULT '',
+  gradient_from  TEXT        NOT NULL DEFAULT '#7C3AED',
+  gradient_to    TEXT        NOT NULL DEFAULT '#4F46E5',
+  icon_name      TEXT        NOT NULL DEFAULT 'info',
+  link_url       TEXT        NOT NULL DEFAULT '',
+  sort_order     INTEGER     NOT NULL DEFAULT 0,
+  enabled        BOOLEAN     NOT NULL DEFAULT TRUE,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_promo_contents_enabled_sort
+  ON promo_contents(enabled, sort_order ASC);

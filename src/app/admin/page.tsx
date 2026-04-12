@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { YoutubeSourceChannelsPanel } from "./youtube-source-channels-panel";
+import { PromoContentsPanel } from "./promo-contents-panel";
 import {
   buildManualKeywordFeedback,
   type ManualKeywordFeedback,
@@ -431,6 +432,8 @@ export default function AdminPage() {
         )}
 
         <YoutubeSourceChannelsPanel />
+
+        <PromoContentsPanel />
       </section>
     </main>
   );

@@ -1596,3 +1596,139 @@ export async function getYoutubeVideoByVideoId(
 
   return (rows as YouTubeVideo[])[0] ?? null;
 }
+
+// ─── Promo content queries ───────────────────────────────────────────────────
+
+export interface PromoContent {
+  id: number;
+  slug: string;
+  tag: string;
+  tag_color: string;
+  title_ko: string;
+  title_en: string;
+  subtitle_ko: string;
+  subtitle_en: string;
+  body_ko: string;
+  body_en: string;
+  image_url: string;
+  gradient_from: string;
+  gradient_to: string;
+  icon_name: string;
+  link_url: string;
+  sort_order: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listPromoContents(enabledOnly = false): Promise<PromoContent[]> {
+  const rows = enabledOnly
+    ? await sql`
+        SELECT * FROM promo_contents
+        WHERE enabled = TRUE
+        ORDER BY sort_order ASC, id ASC
+      `
+    : await sql`
+        SELECT * FROM promo_contents
+        ORDER BY sort_order ASC, id ASC
+      `;
+  return rows as PromoContent[];
+}
+
+export async function getPromoMaxUpdatedAt(): Promise<string | null> {
+  const rows = await sql`
+    SELECT MAX(updated_at) AS max_updated_at
+    FROM promo_contents
+    WHERE enabled = TRUE
+  `;
+  return (rows as { max_updated_at: string | null }[])[0]?.max_updated_at ?? null;
+}
+
+export async function insertPromoContent(input: {
+  slug: string;
+  tag: string;
+  tagColor: string;
+  titleKo: string;
+  titleEn: string;
+  subtitleKo: string;
+  subtitleEn: string;
+  bodyKo: string;
+  bodyEn: string;
+  imageUrl: string;
+  gradientFrom: string;
+  gradientTo: string;
+  iconName: string;
+  linkUrl: string;
+  sortOrder: number;
+}): Promise<PromoContent> {
+  const rows = await sql`
+    INSERT INTO promo_contents (
+      slug, tag, tag_color,
+      title_ko, title_en, subtitle_ko, subtitle_en,
+      body_ko, body_en, image_url,
+      gradient_from, gradient_to, icon_name, link_url,
+      sort_order
+    ) VALUES (
+      ${input.slug}, ${input.tag}, ${input.tagColor},
+      ${input.titleKo}, ${input.titleEn}, ${input.subtitleKo}, ${input.subtitleEn},
+      ${input.bodyKo}, ${input.bodyEn}, ${input.imageUrl},
+      ${input.gradientFrom}, ${input.gradientTo}, ${input.iconName}, ${input.linkUrl},
+      ${input.sortOrder}
+    )
+    RETURNING *
+  `;
+  return (rows as PromoContent[])[0];
+}
+
+export async function updatePromoContent(
+  id: number,
+  input: {
+    slug?: string;
+    tag?: string;
+    tagColor?: string;
+    titleKo?: string;
+    titleEn?: string;
+    subtitleKo?: string;
+    subtitleEn?: string;
+    bodyKo?: string;
+    bodyEn?: string;
+    imageUrl?: string;
+    gradientFrom?: string;
+    gradientTo?: string;
+    iconName?: string;
+    linkUrl?: string;
+    sortOrder?: number;
+    enabled?: boolean;
+  }
+): Promise<PromoContent | null> {
+  const rows = await sql`
+    UPDATE promo_contents SET
+      slug          = COALESCE(${input.slug ?? null}, slug),
+      tag           = COALESCE(${input.tag ?? null}, tag),
+      tag_color     = COALESCE(${input.tagColor ?? null}, tag_color),
+      title_ko      = COALESCE(${input.titleKo ?? null}, title_ko),
+      title_en      = COALESCE(${input.titleEn ?? null}, title_en),
+      subtitle_ko   = COALESCE(${input.subtitleKo ?? null}, subtitle_ko),
+      subtitle_en   = COALESCE(${input.subtitleEn ?? null}, subtitle_en),
+      body_ko       = COALESCE(${input.bodyKo ?? null}, body_ko),
+      body_en       = COALESCE(${input.bodyEn ?? null}, body_en),
+      image_url     = COALESCE(${input.imageUrl ?? null}, image_url),
+      gradient_from = COALESCE(${input.gradientFrom ?? null}, gradient_from),
+      gradient_to   = COALESCE(${input.gradientTo ?? null}, gradient_to),
+      icon_name     = COALESCE(${input.iconName ?? null}, icon_name),
+      link_url      = COALESCE(${input.linkUrl ?? null}, link_url),
+      sort_order    = COALESCE(${input.sortOrder ?? null}, sort_order),
+      enabled       = COALESCE(${input.enabled ?? null}, enabled),
+      updated_at    = NOW()
+    WHERE id = ${id}
+    RETURNING *
+  `;
+  return (rows as PromoContent[])[0] ?? null;
+}
+
+export async function deletePromoContent(id: number): Promise<boolean> {
+  const rows = await sql`
+    DELETE FROM promo_contents WHERE id = ${id} RETURNING id
+  `;
+  return (rows as { id: number }[]).length > 0;
+}
