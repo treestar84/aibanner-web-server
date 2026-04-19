@@ -82,10 +82,10 @@ Response format (STRICT JSON, no markdown fences):
 
 Rules (STRICT):
 - "summary": Maximum ${SUMMARY_MAX_CHARS} characters, plain prose, NO emojis, NO bullet points, NO markdown.
-  * This keyword is a real-time trending keyword. Your summary MUST explain what recent event or news (within the last 1-3 days) caused this keyword to trend. Reference specific events, announcements, releases, or incidents from the provided news snippets.
-  * Do NOT write a generic/encyclopedic description of the keyword. Minimize background explanation — readers already know the basics.
-  * If the news snippets clearly indicate why this keyword is hot right now, lead with that reason.
-  * Be factual, specific, and time-aware. Mention dates or timeframes when possible.
+  * Clearly explain what the keyword is: its meaning, product/category/function/concept, and practical relevance.
+  * Include a current attention reason only when the snippets clearly support it; otherwise do not guess and stay focused on explaining the keyword itself.
+  * Do NOT mention the source, feed, ranking site, community, or publication that surfaced the keyword (for example Product Hunt, Hacker News, Reddit, YouTube, GitHub Releases, or a news outlet).
+  * Be factual and specific. Mention dates or timeframes only when they clarify the keyword itself or a clearly relevant event.
 - "bullets": 3-5 hashtag keywords that capture the core themes (e.g. "#Regulation", "#OpenSource"). Each tag must start with #. Use ${langLabel} where natural, keep proper nouns/tech terms in original form.`;
 }
 
