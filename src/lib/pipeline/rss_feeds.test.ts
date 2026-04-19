@@ -39,6 +39,13 @@ test("RSS_FEEDS includes Sebastian Raschka as P1_CONTEXT", () => {
   assert.equal(feed.lang, "en");
 });
 
+test("RSS_FEEDS includes TensorFeed as P1_CONTEXT", () => {
+  const feed = findFeed("https://tensorfeed.ai/feed.xml");
+  assert.ok(feed, "TensorFeed feed should exist");
+  assert.equal(feed.tier, "P1_CONTEXT");
+  assert.equal(feed.lang, "en");
+});
+
 test("RSS_FEEDS includes Dev.to Vibe Coding as COMMUNITY", () => {
   const feed = findFeed("https://dev.to/feed/tag/vibecoding");
   assert.ok(feed, "Dev.to Vibe Coding feed should exist");

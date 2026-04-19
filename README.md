@@ -7,7 +7,7 @@ AI 트렌드 키워드를 수집/랭킹/요약해서 웹 화면과 API로 제공
 - `/app`에서 최신 **AI 트렌드 Top10**을 본다.
 - 각 키워드를 눌러 `/k/:id`에서 **왜 뜨는지(요약) + 근거 출처(news/social/data)**를 본다.
 - 앱/위젯/외부 클라이언트는 REST API로 같은 데이터를 가져온다.
-- 검색어가 DB에 없으면 Tavily fallback으로 관련 출처를 즉시 보여준다.
+- 검색어가 DB에 없으면 Tavily+Naver 하이브리드 fallback으로 관련 출처를 즉시 보여준다.
 
 ## 현재 구현 상태 (코드 기준)
 
@@ -17,7 +17,6 @@ AI 트렌드 키워드를 수집/랭킹/요약해서 웹 화면과 API로 제공
 - 크론: `GET|POST /api/cron/snapshot` + `CRON_SECRET` 인증
 - 운영 스케줄:
   - realtime: **KST 05:00 / 11:00 / 17:00 / 23:00**
-  - briefing: **KST 09:17 / 18:17**
 - 보관 정책: retention 실행(상세 90일, 집계 365일 기본)
 
 ## 사용자 기능과 엔드포인트
@@ -30,7 +29,7 @@ AI 트렌드 키워드를 수집/랭킹/요약해서 웹 화면과 API로 제공
 | 랭킹 목록 | `GET /api/v1/trends/top?limit=10&lang=ko` | Top N 키워드 목록 |
 | 핫 키워드 | `GET /api/v1/trends/hot?limit=10&lang=ko` | 최근 3일 realtime Top10 진입 키워드의 조회수 기반 랭킹 |
 | 키워드 상세 API | `GET /api/v1/keywords/:id?lang=ko` | 특정 키워드 상세 데이터 |
-| 자유 검색 | `GET /api/v1/search?q=...&lang=ko` | DB 검색 우선, 미매칭 시 Tavily fallback |
+| 자유 검색 | `GET /api/v1/search?q=...&lang=ko` | DB 검색 우선, 미매칭 시 Tavily+Naver 하이브리드 fallback |
 | 스냅샷 실행 | `GET/POST /api/cron/snapshot` | 수집~랭킹~저장~retention 배치 실행 |
 
 ## API 빠른 사용 예시
@@ -61,6 +60,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 ```text
 src/
   app/
+    admin/                        # 관리자 UI(수동 키워드/유튜브/프로모션)
     app/page.tsx                 # /app 트렌드 페이지
     k/[id]/page.tsx              # /k/:id 상세 페이지
     api/
@@ -75,7 +75,7 @@ scripts/db/migrate.ts            # DB 마이그레이션
 
 ## 파이프라인 요약
 
-1. 다중 소스 수집: RSS/HN/GDELT/GitHub/YouTube/Changelog
+1. 다중 소스 수집: RSS/HN/GDELT/GitHub/YouTube/Changelog/Product Hunt/Reddit
 2. 키워드 추출/정규화: OpenAI + 하드 필터
 3. 점수화/랭킹: recency/frequency/authority/internal
 4. 소스 수집: Tavily + Naver 한국 자료 보강 + OG 이미지 보강 + 타입 분류
@@ -104,12 +104,12 @@ npm run db:migrate
 최소 실행 기준:
 
 - `DATABASE_URL` (또는 `POSTGRES_URL`)
-- `TAVILY_API_KEY`
 - `OPENAI_API_KEY`
 
 권장:
 
 - `CRON_SECRET`
+- `TAVILY_API_KEY` (글로벌 출처 보강)
 - `OPENAI_MODEL` (기본 `gpt-4o-mini`)
 - `GITHUB_TOKEN` (GitHub 소스 수집 품질/한도 개선)
 - `PRODUCT_HUNT_TOKEN` (Product Hunt Top Products Launching Today 반영)
@@ -124,12 +124,13 @@ cp .env.example .env.local
 
 ## 운영 참고
 
+- 관리자 페이지: `/admin` (수동 키워드, YouTube 추천 소스, 프로모션 카드 관리)
+- 공개 프로모션 API: `GET /api/v1/promos?lang=ko|en`
 - realtime 자동 트리거: `.github/workflows/cron_realtime.yml`
-- briefing 자동 트리거: `.github/workflows/cron.yml`
 - API 상세 문서: `doc/api.md`
 - 파이프라인 상세 문서: `doc/pipeline.md`
 
 ## 주의 (현 시점 코드 기준)
 
-- `keyword_aliases` 테이블은 검색 join에 쓰이지만 alias 저장 로직은 아직 연결되지 않았습니다.
+- `keyword_aliases` 테이블은 검색 join에 쓰이며 스냅샷 처리 시 canonical/ko/en alias를 upsert합니다.
 - `.env.example`에 일부 미사용 키가 남아 있습니다(`UPSTASH_*`, `RATE_LIMIT_RPM`, `TAVILY_WEB_RESULTS`).

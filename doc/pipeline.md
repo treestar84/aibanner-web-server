@@ -1,17 +1,17 @@
 # AI 트렌드 위젯 — 파이프라인 동작 문서
 
-> 최종 업데이트: 2026-02-23
+> 최종 업데이트: 2026-04-20
 > 관련 코드: `src/lib/pipeline/`
 
 ---
 
 ## 개요
 
-스냅샷 파이프라인은 하루 4회(KST 09/12/18/21) 자동 실행되며,
-AI 관련 RSS 피드를 수집해 트렌드 키워드 Top 10을 생성하고 DB에 저장합니다.
+스냅샷 파이프라인은 하루 4회(KST 05:00 / 11:00 / 17:00 / 23:00) 자동 실행되며,
+AI 관련 RSS/API 소스를 수집해 트렌드 후보 Top20을 만들고 Top10 상세 데이터를 DB에 저장합니다.
 
 ```
-RSS 수집 → 후보 추출 → AI 클러스터링 → 스코어링 → Tavily 검색 → 요약 생성 → DB 저장
+RSS/API 수집 → 후보 추출 → AI 클러스터링 → 스코어링 → Tavily+Naver 검색 보강 → 요약 생성 → DB 저장
 ```
 
 실행 진입점: `src/app/api/cron/snapshot/route.ts`
@@ -23,15 +23,14 @@ RSS 수집 → 후보 추출 → AI 클러스터링 → 스코어링 → Tavily 
 
 ### 피드 구성
 
-19개 피드를 5개 티어로 분류합니다. 티어는 이후 스코어링의 authority 점수에 반영됩니다.
+RSS 피드를 4개 티어로 분류합니다. 별도 API 수집기(Product Hunt Top, Reddit, GitHub, YouTube 등)는 `snapshot.ts`의 `SOURCE_PLANS`에서 함께 실행됩니다. 티어는 이후 스코어링의 authority 점수에 반영됩니다.
 
 | 티어 | 설명 | 예시 |
 |---|---|---|
 | `P0_CURATED` | 고품질 AI 공식 블로그 | OpenAI Blog, Anthropic Blog, HuggingFace Blog |
-| `P0_RELEASES` | AI 모델/SDK GitHub 릴리즈 | openai-python, anthropic-sdk-python, langchain |
 | `P1_CONTEXT` | AI 전문 뉴스 미디어 | TechCrunch AI, VentureBeat AI, The Verge AI |
-| `P2_RAW` | 한국어 AI 뉴스 | AI타임스, 전자신문 AI, ZDNet Korea |
-| `COMMUNITY` | 커뮤니티 | r/MachineLearning, r/artificial, HackerNews AI |
+| `P2_RAW` | 한국어 AI 뉴스 | ZDNet Korea 등 |
+| `COMMUNITY` | 커뮤니티/RSS | Dev.to, HackerNews AI, Towards AI |
 
 ### 수집 조건
 
@@ -42,7 +41,7 @@ RSS 수집 → 후보 추출 → AI 클러스터링 → 스코어링 → Tavily 
 
 ### 예상 수집량
 
-정상 동작 시 30~100개 아이템. 피드 가용성에 따라 달라집니다.
+정상 동작 시 RSS와 API 수집기를 합쳐 수십~수백 개 아이템. 피드/API 가용성과 증분 윈도우에 따라 달라집니다.
 
 ---
 
@@ -248,7 +247,7 @@ Top 10 키워드 × 1회 = 10회 gpt-4o-mini 호출 / 스냅샷
 snapshots       : 스냅샷 메타 (ID, 업데이트 시각, 다음 업데이트 시각)
 keywords        : Top 10 키워드 + 점수 + 요약 + top source
 sources         : 키워드별 소스 카드 (news/social/data, 최대 8개/타입)
-keyword_aliases : (현재 미사용, 향후 검색 최적화용)
+keyword_aliases : canonical/ko/en alias 저장, 검색 join에 사용
 ```
 
 ### 스냅샷 ID 형식
@@ -264,9 +263,10 @@ keyword_aliases : (현재 미사용, 향후 검색 최적화용)
 | 항목 | 호출 수 | 비고 |
 |---|---|---|
 | OpenAI gpt-4o-mini | ~11회 | 클러스터링 1 + 요약 10 |
-| Tavily Search | ~30~40회 | 키워드 10 × 카테고리 3(+broad) |
+| Tavily Search | ~30~50회 | 키워드 10 × 카테고리 3(+broad, news 보충) |
+| Naver Search | 최대 30회 | 키워드 10 × news/blog/cafe, 자격 증명 있을 때만 |
 | OG 이미지 fetch | ~100회 | HTTP 요청, 비용 없음 |
-| **하루 합계** | gpt-4o-mini ~44회, Tavily ~160회 | 스냅샷 4회/일 |
+| **하루 합계** | gpt-4o-mini ~44회, Tavily ~120~200회, Naver 최대 ~120회 | 스냅샷 4회/일 |
 
 ---
 
@@ -279,16 +279,16 @@ curl -X GET http://localhost:3000/api/cron/snapshot \
   -H "Authorization: Bearer <CRON_SECRET>"
 ```
 
-### Vercel 자동 실행 (vercel.json)
+### GitHub Actions 자동 실행
 
-```json
-{ "crons": [
-  { "path": "/api/cron/snapshot", "schedule": "0 0 * * *"  },  // KST 09:00
-  { "path": "/api/cron/snapshot", "schedule": "0 3 * * *"  },  // KST 12:00
-  { "path": "/api/cron/snapshot", "schedule": "0 9 * * *"  },  // KST 18:00
-  { "path": "/api/cron/snapshot", "schedule": "0 12 * * *" }   // KST 21:00
-]}
+`.github/workflows/cron_realtime.yml`에서 Vercel API를 호출합니다.
+
+```yaml
+schedule:
+  - cron: "0 2,8,14,20 * * *" # KST 05:00 / 11:00 / 17:00 / 23:00
 ```
+
+프로덕션에는 `APP_URL`, `CRON_SECRET` GitHub secret이 필요합니다.
 
 ### DB 마이그레이션
 
@@ -305,4 +305,4 @@ npm run db:migrate
 | P0_CURATED 피드 수집 불안정 | 일부 블로그 RSS URL 만료/변경 | 주기적 URL 검증 자동화 |
 | 한국어 키워드 ID 가독성 낮음 | slugify가 CJK 제거 → 해시 사용 | 로마자 표기 변환 or UUID |
 | 영문 키워드 편향 | 한국어 n-gram 추출 미지원 | 형태소 분석기 연동 (mecab/kiwi) |
-| Tavily 40회 호출 비용 | 키워드×타입 조합 | 인기도 낮은 키워드는 타입 축소 |
+| Tavily/Naver 외부 검색 호출 비용 | 키워드×타입 조합 | 타입별 결과 수 조정, Naver는 2건씩 보수 유지 |

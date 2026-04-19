@@ -24,27 +24,32 @@ interface PromoItem {
   updated_at: string;
 }
 
+function generateSlug(title: string): string {
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    || `promo-${Date.now()}`;
+}
+
+function extractFirstSentence(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^.+?[.!?。]\s*/);
+  return match ? match[0].trim() : trimmed.slice(0, 80);
+}
+
 export function PromoContentsPanel() {
   const [items, setItems] = useState<PromoItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // form fields
-  const [slug, setSlug] = useState("");
-  const [tag, setTag] = useState("INFO");
-  const [tagColor, setTagColor] = useState("#7C3AED");
-  const [titleKo, setTitleKo] = useState("");
-  const [titleEn, setTitleEn] = useState("");
-  const [subtitleKo, setSubtitleKo] = useState("");
-  const [subtitleEn, setSubtitleEn] = useState("");
-  const [bodyKo, setBodyKo] = useState("");
-  const [bodyEn, setBodyEn] = useState("");
+  // 최소 입력 필드: 제목, 본문, 이미지
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
   const [imageUrl, setImageUrl] = useState("");
-  const [gradientFrom, setGradientFrom] = useState("#7C3AED");
-  const [gradientTo, setGradientTo] = useState("#4F46E5");
-  const [iconName, setIconName] = useState("info");
-  const [linkUrl, setLinkUrl] = useState("");
-  const [sortOrder, setSortOrder] = useState(0);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -60,30 +65,37 @@ export function PromoContentsPanel() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!slug.trim() || !titleKo.trim() || !titleEn.trim()) {
-      setError("slug, 제목(ko), 제목(en) 필수");
+    if (!title.trim()) {
+      setError("제목을 입력해주세요");
+      return;
+    }
+    if (!body.trim()) {
+      setError("본문을 입력해주세요");
       return;
     }
     setLoading(true);
     setError("");
     try {
+      const subtitle = extractFirstSentence(body);
+      const maxSort = items.length > 0
+        ? Math.max(...items.map((i) => i.sort_order))
+        : -1;
+
       const res = await fetch("/api/admin/promo-contents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          slug, tag, tagColor, titleKo, titleEn,
-          subtitleKo, subtitleEn, bodyKo, bodyEn,
-          imageUrl, gradientFrom, gradientTo, iconName, linkUrl, sortOrder,
+          slug: generateSlug(title),
+          titleKo: title.trim(),
+          subtitleKo: subtitle,
+          bodyKo: body.trim(),
+          imageUrl: imageUrl.trim(),
+          sortOrder: maxSort + 1,
         }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "Error"); return; }
-      // reset form
-      setSlug(""); setTitleKo(""); setTitleEn("");
-      setSubtitleKo(""); setSubtitleEn("");
-      setBodyKo(""); setBodyEn("");
-      setImageUrl(""); setLinkUrl("");
-      setSortOrder(0);
+      setTitle(""); setBody(""); setImageUrl("");
       await fetchItems();
     } catch {
       setError("Failed to create promo");
@@ -108,11 +120,12 @@ export function PromoContentsPanel() {
   };
 
   const inputStyle: React.CSSProperties = {
-    padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6,
-    fontSize: 13, width: "100%", boxSizing: "border-box",
+    padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 6,
+    fontSize: 14, width: "100%", boxSizing: "border-box",
+    color: "#111827", backgroundColor: "#fff",
   };
   const labelStyle: React.CSSProperties = {
-    fontSize: 12, fontWeight: 600, marginBottom: 2, display: "block", color: "#555",
+    fontSize: 13, fontWeight: 600, marginBottom: 4, display: "block", color: "#111827",
   };
 
   return (
@@ -127,77 +140,25 @@ export function PromoContentsPanel() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 24, padding: 16, border: "1px solid #e5e7eb", borderRadius: 12 }}>
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24, padding: 16, border: "1px solid #e5e7eb", borderRadius: 12 }}>
         <div>
-          <label style={labelStyle}>Slug (URL용)</label>
-          <input style={inputStyle} value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="claude-code-meetup" />
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-          <div>
-            <label style={labelStyle}>태그</label>
-            <input style={inputStyle} value={tag} onChange={(e) => setTag(e.target.value)} placeholder="EVENT" />
-          </div>
-          <div>
-            <label style={labelStyle}>태그 색상</label>
-            <input style={inputStyle} type="color" value={tagColor} onChange={(e) => setTagColor(e.target.value)} />
-          </div>
-          <div>
-            <label style={labelStyle}>순서</label>
-            <input style={inputStyle} type="number" value={sortOrder} onChange={(e) => setSortOrder(Number(e.target.value))} />
-          </div>
+          <label style={labelStyle}>제목 *</label>
+          <input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="프로모션 제목을 입력하세요" />
         </div>
         <div>
-          <label style={labelStyle}>제목 (ko)</label>
-          <input style={inputStyle} value={titleKo} onChange={(e) => setTitleKo(e.target.value)} placeholder="Claude Code Meetup 판교" />
-        </div>
-        <div>
-          <label style={labelStyle}>제목 (en)</label>
-          <input style={inputStyle} value={titleEn} onChange={(e) => setTitleEn(e.target.value)} placeholder="Claude Code Meetup Pangyo" />
-        </div>
-        <div>
-          <label style={labelStyle}>부제목 (ko)</label>
-          <input style={inputStyle} value={subtitleKo} onChange={(e) => setSubtitleKo(e.target.value)} />
-        </div>
-        <div>
-          <label style={labelStyle}>부제목 (en)</label>
-          <input style={inputStyle} value={subtitleEn} onChange={(e) => setSubtitleEn(e.target.value)} />
-        </div>
-        <div>
-          <label style={labelStyle}>본문 (ko)</label>
-          <textarea style={{ ...inputStyle, minHeight: 80 }} value={bodyKo} onChange={(e) => setBodyKo(e.target.value)} />
-        </div>
-        <div>
-          <label style={labelStyle}>본문 (en)</label>
-          <textarea style={{ ...inputStyle, minHeight: 80 }} value={bodyEn} onChange={(e) => setBodyEn(e.target.value)} />
+          <label style={labelStyle}>본문 *</label>
+          <textarea style={{ ...inputStyle, minHeight: 100 }} value={body} onChange={(e) => setBody(e.target.value)} placeholder="프로모션 내용을 입력하세요 (첫 문장이 부제목으로 사용됩니다)" />
         </div>
         <div>
           <label style={labelStyle}>이미지 URL</label>
           <input style={inputStyle} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." />
         </div>
-        <div>
-          <label style={labelStyle}>외부 링크 URL</label>
-          <input style={inputStyle} value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." />
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-          <div>
-            <label style={labelStyle}>그라데이션 From</label>
-            <input style={inputStyle} type="color" value={gradientFrom} onChange={(e) => setGradientFrom(e.target.value)} />
-          </div>
-          <div>
-            <label style={labelStyle}>그라데이션 To</label>
-            <input style={inputStyle} type="color" value={gradientTo} onChange={(e) => setGradientTo(e.target.value)} />
-          </div>
-          <div>
-            <label style={labelStyle}>아이콘명</label>
-            <input style={inputStyle} value={iconName} onChange={(e) => setIconName(e.target.value)} placeholder="groups" />
-          </div>
-        </div>
-        <div style={{ gridColumn: "1 / -1", textAlign: "right" }}>
+        <div style={{ textAlign: "right" }}>
           <button
             type="submit"
             disabled={loading}
             style={{
-              padding: "8px 24px", background: "#7C3AED", color: "#fff",
+              padding: "10px 28px", background: "#7C3AED", color: "#fff",
               border: "none", borderRadius: 8, fontSize: 14, fontWeight: 600,
               cursor: loading ? "wait" : "pointer", opacity: loading ? 0.6 : 1,
             }}

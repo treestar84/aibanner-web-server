@@ -1,6 +1,6 @@
 # AI 트렌드 위젯 - API 데이터/사용 가이드
 
-> 최종 업데이트: 2026-02-27  
+> 최종 업데이트: 2026-04-20
 > 관련 코드: `src/app/api/`
 
 ## 1. 빠른 사용 흐름
@@ -42,7 +42,7 @@
   "latestSnapshotId": "20260227_2100_KST",
   "updatedAt": "2026-02-27T12:00:00.000Z",
   "nextUpdateAt": "2026-02-27T21:00:00.000Z",
-  "scheduleKst": ["09:17", "18:17"]
+  "scheduleKst": ["05:00", "11:00", "17:00", "23:00"]
 }
 ```
 
@@ -230,7 +230,7 @@ curl "http://localhost:3000/api/v1/keywords/gpt_5_1?snapshotId=20260227_2100_KST
 
 1. 최신 스냅샷 DB에서 `keyword`/`alias`를 부분 검색 (`ILIKE`)
 2. 결과가 있으면 랭크가 가장 높은 1개 키워드 상세 반환
-3. 결과가 없으면 Tavily 검색 결과를 fallback으로 반환
+3. 결과가 없으면 Tavily+Naver 하이브리드 검색 결과를 fallback으로 반환
 
 쿼리 파라미터:
 
@@ -271,7 +271,7 @@ curl "http://localhost:3000/api/v1/search?q=claude%20code&limit=5&lang=ko"
 }
 ```
 
-응답 예시(DB 미매칭 -> Tavily fallback):
+응답 예시(DB 미매칭 -> Tavily+Naver fallback):
 
 ```json
 {
@@ -303,7 +303,45 @@ curl "http://localhost:3000/api/v1/search?q=claude%20code&limit=5&lang=ko"
 - `400`: `{ "error": "q parameter is required" }`
 - `500`: `{ "error": "Internal server error" }`
 
-### 3.5 `GET/POST /api/cron/snapshot`
+### 3.5 `GET /api/v1/promos`
+
+앱/웹에 노출할 활성 프로모션 카드 목록을 반환합니다.
+
+쿼리 파라미터:
+
+- `lang` (선택): `ko`(기본) 또는 `en`
+
+응답 특징:
+
+- `Cache-Control: public, max-age=3600, s-maxage=3600`
+- 활성 프로모션의 `updated_at` 기준 `Last-Modified` 제공
+- 클라이언트의 `If-Modified-Since`가 최신이면 `304` 반환
+
+응답 예시:
+
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "slug": "claude-code-meetup",
+      "tag": "INFO",
+      "tagColor": "#7C3AED",
+      "title": "프로모션 제목",
+      "subtitle": "첫 문장 기반 부제목",
+      "body": "프로모션 본문",
+      "imageUrl": "https://example.com/image.png",
+      "gradientFrom": "#7C3AED",
+      "gradientTo": "#4F46E5",
+      "iconName": "info",
+      "linkUrl": ""
+    }
+  ],
+  "updatedAt": "2026-04-20T00:00:00.000Z"
+}
+```
+
+### 3.6 `GET/POST /api/cron/snapshot`
 
 스냅샷 파이프라인을 실행합니다. `POST`는 `GET`과 동일 동작입니다.
 
@@ -337,7 +375,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 - `401`: `{ "error": "Unauthorized" }`
 - `500`: `{ "error": "Pipeline failed", "detail": "..." }`
 
-### 3.6 `POST /api/v1/keywords/{id}/view`
+### 3.7 `POST /api/v1/keywords/{id}/view`
 
 특정 키워드 상세 조회 이벤트를 누적합니다.
 
@@ -393,4 +431,5 @@ interface GroupedSources {
 - `src/app/api/v1/trends/top/route.ts`
 - `src/app/api/v1/keywords/[id]/route.ts`
 - `src/app/api/v1/search/route.ts`
+- `src/app/api/v1/promos/route.ts`
 - `src/app/api/cron/snapshot/route.ts`

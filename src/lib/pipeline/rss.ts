@@ -56,6 +56,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { url: "https://venturebeat.com/category/ai/feed/", title: "VentureBeat AI", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml", title: "The Verge AI", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://arstechnica.com/ai/feed/", title: "Ars Technica AI", tier: "P1_CONTEXT", lang: "en" },
+  { url: "https://tensorfeed.ai/feed.xml", title: "TensorFeed", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://simonwillison.net/atom/everything/", title: "Simon Willison", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://www.latent.space/feed", title: "Latent Space", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://www.semianalysis.com/feed", title: "SemiAnalysis", tier: "P1_CONTEXT", lang: "en" },

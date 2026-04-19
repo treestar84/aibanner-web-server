@@ -21,27 +21,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const slug = typeof body.slug === "string" ? body.slug.trim() : "";
     const titleKo = typeof body.titleKo === "string" ? body.titleKo.trim() : "";
-    const titleEn = typeof body.titleEn === "string" ? body.titleEn.trim() : "";
 
-    if (!slug || !titleKo || !titleEn) {
+    if (!titleKo) {
       return NextResponse.json(
-        { error: "slug, titleKo, titleEn are required" },
+        { error: "titleKo is required" },
         { status: 400 }
       );
     }
+
+    const slug = typeof body.slug === "string" && body.slug.trim()
+      ? body.slug.trim()
+      : `promo-${Date.now()}`;
+    const bodyKo = typeof body.bodyKo === "string" ? body.bodyKo : "";
+    const subtitleKo = typeof body.subtitleKo === "string" && body.subtitleKo
+      ? body.subtitleKo
+      : bodyKo.trim().match(/^.+?[.!?。]\s*/)?.[0]?.trim() || bodyKo.slice(0, 80);
 
     const item = await insertPromoContent({
       slug,
       tag: typeof body.tag === "string" ? body.tag : "INFO",
       tagColor: typeof body.tagColor === "string" ? body.tagColor : "#7C3AED",
       titleKo,
-      titleEn,
-      subtitleKo: typeof body.subtitleKo === "string" ? body.subtitleKo : "",
-      subtitleEn: typeof body.subtitleEn === "string" ? body.subtitleEn : "",
-      bodyKo: typeof body.bodyKo === "string" ? body.bodyKo : "",
-      bodyEn: typeof body.bodyEn === "string" ? body.bodyEn : "",
+      titleEn: typeof body.titleEn === "string" && body.titleEn ? body.titleEn : titleKo,
+      subtitleKo,
+      subtitleEn: typeof body.subtitleEn === "string" && body.subtitleEn ? body.subtitleEn : subtitleKo,
+      bodyKo,
+      bodyEn: typeof body.bodyEn === "string" && body.bodyEn ? body.bodyEn : bodyKo,
       imageUrl: typeof body.imageUrl === "string" ? body.imageUrl : "",
       gradientFrom: typeof body.gradientFrom === "string" ? body.gradientFrom : "#7C3AED",
       gradientTo: typeof body.gradientTo === "string" ? body.gradientTo : "#4F46E5",
