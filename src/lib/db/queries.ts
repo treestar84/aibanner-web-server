@@ -1170,7 +1170,18 @@ export async function getSourcesByKeyword(
   return (await sql`
     SELECT * FROM sources
     WHERE snapshot_id = ${snapshotId} AND keyword_id = ${keywordId}
-    ORDER BY type, id ASC
+    ORDER BY
+      type,
+      CASE
+        WHEN LOWER(COALESCE(domain, '')) = 'naver.com'
+          OR LOWER(COALESCE(domain, '')) LIKE '%.naver.com'
+          OR LOWER(COALESCE(domain, '')) LIKE '%.kr'
+          OR COALESCE(title, '') ~ '[가-힣]'
+          OR COALESCE(snippet, '') ~ '[가-힣]'
+        THEN 0
+        ELSE 1
+      END,
+      id ASC
   `) as Source[];
 }
 

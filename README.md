@@ -78,7 +78,7 @@ scripts/db/migrate.ts            # DB 마이그레이션
 1. 다중 소스 수집: RSS/HN/GDELT/GitHub/YouTube/Changelog
 2. 키워드 추출/정규화: OpenAI + 하드 필터
 3. 점수화/랭킹: recency/frequency/authority/internal
-4. 소스 수집: Tavily + OG 이미지 보강 + 타입 분류
+4. 소스 수집: Tavily + Naver 한국 자료 보강 + OG 이미지 보강 + 타입 분류
 5. 저장: snapshots/keywords/sources
 6. 정리: retention + daily stats 집계
 
@@ -113,7 +113,8 @@ npm run db:migrate
 - `OPENAI_MODEL` (기본 `gpt-4o-mini`)
 - `GITHUB_TOKEN` (GitHub 소스 수집 품질/한도 개선)
 - `PRODUCT_HUNT_TOKEN` (Product Hunt Top Products Launching Today 반영)
-- `PIPELINE_*`, `TAVILY_*`, `RETENTION_*` 튜닝 값
+- `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` (선택, 한국 뉴스/블로그/카페 보강)
+- `PIPELINE_*`, `TAVILY_*`, `NAVER_*`, `RETENTION_*` 튜닝 값
 
 `.env.example`를 템플릿으로 복사 후 사용하세요.
 

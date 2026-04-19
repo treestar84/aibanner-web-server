@@ -1,5 +1,6 @@
 import { tavily } from "@tavily/core";
 import { classifySourceCategory, type PrimaryType } from "./source_category";
+import { collectNaverSources } from "./naver_search";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -13,13 +14,14 @@ export interface TavilySource {
   imageUrl: string | null;
   publishedAt: string | null;
   type: SourceType;
+  provider?: "tavily" | "naver";
 }
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
 function getClient() {
   const apiKey = process.env.TAVILY_API_KEY;
-  if (!apiKey) throw new Error("TAVILY_API_KEY is not set");
+  if (!apiKey) return null;
   return tavily({ apiKey });
 }
 
@@ -70,11 +72,13 @@ const TAVILY_BROAD_RESULTS = parsePositiveIntEnv(
 );
 
 async function fetchByQuery(
-  client: ReturnType<typeof tavily>,
+  client: ReturnType<typeof tavily> | null,
   query: string,
   typeHint: SourceType,
   options: { maxResults: number; timeRange: "day" | "week" | "month" }
 ): Promise<TavilySource[]> {
+  if (!client) return [];
+
   try {
     const res = await client.search(query, {
       searchDepth: "basic",
@@ -90,6 +94,7 @@ async function fetchByQuery(
       imageUrl: null,
       publishedAt: r.publishedDate ?? null,
       type: typeHint,
+      provider: "tavily",
     }));
   } catch {
     return [];
@@ -154,7 +159,8 @@ export async function collectSources(
   const dataQuery = `${exact} (site:youtube.com OR site:youtu.be OR site:docs.google.com OR site:drive.google.com OR site:arxiv.org OR site:openreview.net OR filetype:pdf OR dataset OR research paper OR benchmark)`;
 
   // 뉴스는 최근 1일 우선 수집 후, 부족하면 week로 보충
-  const [newsDay, socialSeed, dataSeed, broadSeed] = await Promise.all([
+  const [naverSources, newsDay, socialSeed, dataSeed, broadSeed] = await Promise.all([
+    collectNaverSources(keyword),
     fetchByQuery(client, newsQuery, "news", {
       maxResults: TAVILY_NEWS_RESULTS,
       timeRange: "day",
@@ -183,11 +189,19 @@ export async function collectSources(
     newsSeed = dedupeByUrl([...newsDay, ...newsWeek]).slice(0, TAVILY_NEWS_RESULTS);
   }
 
-  const merged = dedupeByUrl([...newsSeed, ...socialSeed, ...dataSeed, ...broadSeed]);
+  const merged = dedupeByUrl([
+    ...naverSources.news,
+    ...naverSources.social,
+    ...naverSources.data,
+    ...newsSeed,
+    ...socialSeed,
+    ...dataSeed,
+    ...broadSeed,
+  ]);
   const relevant = filterRelevantSources(merged, keyword);
 
-  // 관련성 점수로 정렬
-  relevant.sort((a, b) => scoreRelevance(b, keyword) - scoreRelevance(a, keyword));
+  // 한국 자료가 있으면 먼저 노출하되, 없으면 기존 글로벌 결과를 유지합니다.
+  relevant.sort((a, b) => scoreSourcePriority(b, keyword) - scoreSourcePriority(a, keyword));
 
   const limits: Record<SourceType, number> = {
     news: TAVILY_NEWS_RESULTS,
@@ -212,6 +226,51 @@ export async function collectSources(
   return buckets;
 }
 
+const KOREAN_SOURCE_DOMAINS = new Set([
+  "naver.com",
+  "blog.naver.com",
+  "cafe.naver.com",
+  "news.naver.com",
+  "aitimes.com",
+  "etnews.com",
+  "zdnet.co.kr",
+  "bloter.net",
+  "it.chosun.com",
+  "ddaily.co.kr",
+  "hankyung.com",
+  "mk.co.kr",
+  "chosun.com",
+  "joongang.co.kr",
+  "yna.co.kr",
+  "news.hada.io",
+  "clien.net",
+  "velog.io",
+  "tistory.com",
+  "brunch.co.kr",
+]);
+
+function normalizeDomain(domain: string | null | undefined): string {
+  return (domain ?? "").trim().toLowerCase().replace(/^www\./, "");
+}
+
+function hasKoreanText(value: string | null | undefined): boolean {
+  return /[가-힣]/.test(value ?? "");
+}
+
+export function isKoreanPreferredSource(
+  source: Pick<TavilySource, "domain" | "title" | "snippet" | "provider">
+): boolean {
+  if (source.provider === "naver") return true;
+
+  const domain = normalizeDomain(source.domain);
+  if (domain.endsWith(".kr")) return true;
+  for (const knownDomain of KOREAN_SOURCE_DOMAINS) {
+    if (domain === knownDomain || domain.endsWith(`.${knownDomain}`)) return true;
+  }
+
+  return hasKoreanText(source.title) || hasKoreanText(source.snippet);
+}
+
 /**
  * 수집된 소스 중 키워드와 실제 관련 없는 항목을 필터링합니다.
  * 제목+snippet에 키워드가 exact match로 포함되지 않는 경우,
@@ -228,6 +287,11 @@ function filterRelevantSources(
   if (kwWords.length <= 1) return sources;
 
   return sources.filter((source) => {
+    // Naver 검색 결과는 한국어 번역/음차 제목이 많아 영문 키워드 exact 검사를
+    // 그대로 적용하면 한국 자료가 사라질 수 있습니다. 보수적으로 2건씩만
+    // 수집하므로 Naver 결과는 검색 공급자의 관련도 판단을 우선 신뢰합니다.
+    if (source.provider === "naver") return true;
+
     const text = `${source.title} ${source.snippet}`.toLowerCase();
 
     // 1) exact match: "mode ai"가 텍스트에 그대로 존재
@@ -270,4 +334,18 @@ function scoreRelevance(source: TavilySource, keyword: string): number {
   }
 
   return Math.min(1, score);
+}
+
+export function scoreSourcePriority(source: TavilySource, keyword: string): number {
+  const relevanceScore = scoreRelevance(source, keyword);
+  let priorityScore = relevanceScore;
+
+  if (isKoreanPreferredSource(source)) {
+    priorityScore += 1.2;
+  }
+  if (source.provider === "naver") {
+    priorityScore += 0.2;
+  }
+
+  return priorityScore;
 }
