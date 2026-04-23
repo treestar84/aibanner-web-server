@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/queries";
 import { collectSources } from "@/lib/pipeline/tavily";
 import { classifySourceCategory } from "@/lib/pipeline/source_category";
+import { buildSnsDeeplinks } from "@/lib/pipeline/sns_deeplinks";
 import { batchTranslateTitles } from "@/lib/pipeline/summarize";
 import { filterActiveSnapshotKeywords } from "@/lib/manual-keywords";
 
@@ -80,17 +81,19 @@ export async function GET(req: NextRequest) {
               })),
           })).filter((g) => g.items.length > 0);
 
+          const localizedKeyword = lang === "en"
+            ? (keyword.keyword_en || keyword.keyword)
+            : (keyword.keyword_ko || keyword.keyword);
           return NextResponse.json({
             id: keyword.keyword_id,
-            keyword: lang === "en"
-              ? (keyword.keyword_en || keyword.keyword)
-              : (keyword.keyword_ko || keyword.keyword),
+            keyword: localizedKeyword,
             updatedAt: keyword.created_at,
             summary: lang === "en"
               ? (keyword.summary_short_en || keyword.summary_short)
               : keyword.summary_short,
             bullets: [],
             sources: grouped,
+            deeplinks: buildSnsDeeplinks(localizedKeyword),
           });
         }
       }
@@ -140,6 +143,7 @@ export async function GET(req: NextRequest) {
       summary: firstSnippet,
       bullets: [],
       sources: grouped,
+      deeplinks: buildSnsDeeplinks(fallbackKeyword),
     });
   } catch (err) {
     console.error("[/api/v1/search]", err);
