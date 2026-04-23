@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/queries";
 import { isManualKeywordId } from "@/lib/manual-keywords";
 import { classifySourceCategory } from "@/lib/pipeline/source_category";
+import { buildSnsDeeplinks } from "@/lib/pipeline/sns_deeplinks";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -112,6 +113,10 @@ export async function GET(
     let bullets: string[] = [];
     try { bullets = JSON.parse(bulletsRaw); } catch { /* empty */ }
 
+    // Phase 3 §5.2.6 (PRD 2026-04-23): SNS·검색 deeplink 4종.
+    // localizedKeyword(현재 lang에 맞춘 표기) 기준으로 검색 URL을 만든다.
+    const deeplinks = buildSnsDeeplinks(localizedKeyword);
+
     return NextResponse.json(
       {
         snapshotId: keyword.snapshot_id,
@@ -123,6 +128,7 @@ export async function GET(
           : keyword.summary_short,
         bullets,
         sources: grouped,
+        deeplinks,
       },
       {
         headers: {
