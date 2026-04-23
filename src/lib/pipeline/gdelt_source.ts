@@ -45,6 +45,55 @@ function parseGdeltDate(seendate: string): Date {
   return new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`);
 }
 
+// Phase 1 §3.2.7 (PRD 2026-04-23 · audit-A#L362):
+// 한국어 GDELT 결과를 별도로 1회 더 가져와 한국 사용자 카테고리 커버리지를 강화한다.
+// (영문 broad 쿼리는 GDELT가 한국어 매체를 적게 포함시키는 경향이 있음.)
+async function fetchGdeltOnce(
+  query: string,
+  windowHours: number,
+  extraParams: Record<string, string> = {}
+): Promise<RssItem[]> {
+  const until = new Date();
+  const since = new Date(until.getTime() - windowHours * 60 * 60 * 1000);
+
+  const params = new URLSearchParams({
+    query,
+    mode: "artlist",
+    maxrecords: "250",
+    format: "json",
+    startdatetime: gdeltDateFormat(since),
+    enddatetime: gdeltDateFormat(until),
+    ...extraParams,
+  });
+
+  const res = await fetch(
+    `https://api.gdeltproject.org/api/v2/doc/doc?${params}`,
+    { signal: AbortSignal.timeout(15000) }
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data: GdeltResponse = await res.json();
+  if (!data.articles) return [];
+
+  const items: RssItem[] = [];
+  for (const article of data.articles) {
+    if (!article.url || !article.title) continue;
+    items.push({
+      title: article.title,
+      link: article.url,
+      publishedAt: parseGdeltDate(article.seendate),
+      summary: "",
+      sourceDomain:
+        article.domain ||
+        new URL(article.url).hostname.replace(/^www\./, ""),
+      feedTitle: "GDELT",
+      tier: "P1_CONTEXT" as const,
+      lang: mapGdeltLang(article.language),
+    });
+  }
+  return items;
+}
+
 export async function collectGdeltItems(windowHours = 72): Promise<RssItem[]> {
   try {
     const dynamicQuery = await buildDynamicQuery();
@@ -53,50 +102,27 @@ export async function collectGdeltItems(windowHours = 72): Promise<RssItem[]> {
       .map((term) => `"${term.replace(/^"|"$/g, "").trim()}"`)
       .join(" OR ");
 
-    const until = new Date();
-    const since = new Date(until.getTime() - windowHours * 60 * 60 * 1000);
+    const [enResult, koResult] = await Promise.allSettled([
+      fetchGdeltOnce(gdeltQuery, windowHours),
+      fetchGdeltOnce(gdeltQuery, windowHours, { sourcelang: "kor" }),
+    ]);
 
-    const params = new URLSearchParams({
-      query: gdeltQuery,
-      mode: "artlist",
-      maxrecords: "250",
-      format: "json",
-      startdatetime: gdeltDateFormat(since),
-      enddatetime: gdeltDateFormat(until),
-    });
-
-    const res = await fetch(
-      `https://api.gdeltproject.org/api/v2/doc/doc?${params}`,
-      { signal: AbortSignal.timeout(15000) }
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const data: GdeltResponse = await res.json();
-    if (!data.articles) return [];
-
+    const merged: RssItem[] = [];
     const seen = new Set<string>();
-    const items: RssItem[] = [];
-
-    for (const article of data.articles) {
-      if (!article.url || !article.title || seen.has(article.url)) continue;
-      seen.add(article.url);
-
-      items.push({
-        title: article.title,
-        link: article.url,
-        publishedAt: parseGdeltDate(article.seendate),
-        summary: "",
-        sourceDomain:
-          article.domain ||
-          new URL(article.url).hostname.replace(/^www\./, ""),
-        feedTitle: "GDELT",
-        tier: "P1_CONTEXT" as const,
-        lang: mapGdeltLang(article.language),
-      });
+    for (const result of [enResult, koResult]) {
+      if (result.status !== "fulfilled") {
+        console.warn("[gdelt_source] partial failure:", (result.reason as Error)?.message);
+        continue;
+      }
+      for (const item of result.value) {
+        if (seen.has(item.link)) continue;
+        seen.add(item.link);
+        merged.push(item);
+      }
     }
 
-    console.log(`[gdelt_source] Got ${items.length} items`);
-    return items;
+    console.log(`[gdelt_source] Got ${merged.length} items (en + ko merged)`);
+    return merged;
   } catch (err) {
     console.warn("[gdelt_source] Failed:", (err as Error).message);
     return [];
