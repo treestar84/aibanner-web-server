@@ -1,6 +1,6 @@
 import type { RssItem } from "./rss";
 import OpenAI from "openai";
-import { isExactlyExcludedKeyword } from "./keyword_exclusions";
+import { isExcludedKeyword } from "./keyword_exclusions";
 import type { PipelineMode } from "./mode";
 
 // ─── Generic term filter (hard filter — safety net after LLM extraction) ─────
@@ -1392,8 +1392,8 @@ export async function normalizeKeywords(
   );
 
   const llmKeywords = semanticMerged.keywords.filter((kw) => {
-    if (!isExactlyExcludedKeyword(kw.keyword)) return true;
-    console.log(`[keywords] DROP(exact_exclusion): "${kw.keyword}"`);
+    if (!isExcludedKeyword(kw.keyword)) return true;
+    console.log(`[keywords] DROP(exclusion): "${kw.keyword}"`);
     return false;
   });
   console.log(`[keywords] After exact_exclusion: ${semanticMerged.keywords.length} → ${llmKeywords.length} keywords`);

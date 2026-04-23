@@ -1,4 +1,9 @@
 {
+  "_schema": "Phase 2-A §4.2.1: 3단 분기 — exact (정확 일치), prefix (접두사 일치), regex (정규식 i flag 일치).",
+  "_example_prefix": "ai agent ",
+  "_example_regex": "^(chatgpt|gpt) (4|5|6)\\.",
+  "prefix": [],
+  "regex": [],
   "exact": [
     "a.i.",
     "agent",

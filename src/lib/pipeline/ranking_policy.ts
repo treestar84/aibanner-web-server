@@ -338,13 +338,15 @@ export function calculateKeywordPolicyDelta(
 ): number {
   let delta = 0;
 
-  if (meta.keywordKind === "incident") delta += 0.08;
-  if (meta.keywordKind === "feature_event") delta += 0.06;
-  if (meta.keywordKind === "version_release") delta += 0.01;
+  // Phase 2-A §4.2.2 (PRD 2026-04-23 · audit-B#L194-205): 정책 delta 계수 축소.
+  // 사유: 현행 +0.08/+0.06 등이 자연 score(~1.0) 대비 과도해 노이즈 키워드가 과대 부스팅되는 문제.
+  if (meta.keywordKind === "incident") delta += 0.02;
+  if (meta.keywordKind === "feature_event") delta += 0.02;
+  if (meta.keywordKind === "version_release") delta += 0.005;
 
-  if (meta.versionKind === "major") delta += 0.04;
-  if (meta.versionKind === "patch") delta -= 0.06;
-  if (meta.versionKind === "build") delta -= 0.12;
+  if (meta.versionKind === "major") delta += 0.01;
+  if (meta.versionKind === "patch") delta -= 0.02;
+  if (meta.versionKind === "build") delta -= 0.04;
 
   const isWeakVersionOnly =
     meta.keywordKind === "version_only" &&
@@ -441,15 +443,17 @@ export function calculateStabilityDelta(
     item.score.velocity >= 0.45 ||
     item.keyword.candidates.domains.size >= 3;
 
+  // Phase 2-A §4.2.3 (PRD 2026-04-23 · audit-B#L460-463): stability delta 계수 축소.
+  // 사유: 기득권 편향(echo chamber) 완화 + 신규 진입 장벽 약화.
   if (item.isNew) {
     delta += strongBreakout ? 0.03 : -0.03;
   } else if ((history?.previousRank ?? 999) <= 10) {
-    delta += 0.04;
+    delta += 0.01;
   }
 
   const appearances = history?.appearances ?? 0;
   if (appearances >= 2) {
-    delta += Math.min(0.03, (appearances - 1) * 0.01);
+    delta += Math.min(0.01, (appearances - 1) * 0.01);
   }
 
   const isStale =
@@ -458,7 +462,7 @@ export function calculateStabilityDelta(
     item.score.velocity < 0.08 &&
     item.score.engagement < 0.2;
 
-  if (isStale) delta -= 0.05;
+  if (isStale) delta -= 0.02;
 
   return parseFloat(delta.toFixed(4));
 }
