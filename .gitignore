@@ -42,3 +42,6 @@ Thumbs.db
 
 # Local test results (not for deployment)
 local-tests/
+
+# OMC runtime state (audit/PRD/team 세션 임시 파일)
+.omc/
