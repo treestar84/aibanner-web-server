@@ -196,19 +196,31 @@ test("Phase 1: 제거 — HackerNews AI hnrss (hn_source.ts와 중복)", () => {
   assert.equal(feed, undefined, "HackerNews AI hnrss should be removed");
 });
 
-test("Phase 1: 한국어 매체 비중 (ko ≥ 5; PRD 목표 ≥18% 미달은 §11 OQ로 추적)", () => {
+test("Phase 1: 한국어 매체 비중 ≥18% (PRD §3.1 목표)", () => {
   const koFeeds = RSS_FEEDS.filter((f) => f.lang === "ko");
+  const ratio = koFeeds.length / RSS_FEEDS.length;
   assert.ok(
-    koFeeds.length >= 5,
-    `한국어 매체 ${koFeeds.length}건 (5건 이상이어야 함). 현재 비중: ${(
-      (koFeeds.length / RSS_FEEDS.length) * 100
-    ).toFixed(1)}%`
+    ratio >= 0.18,
+    `한국어 비중 ${(ratio * 100).toFixed(1)}% — 18% 이상이어야 함 (현재 ${koFeeds.length}/${RSS_FEEDS.length})`
   );
 });
 
-test("Phase 1: 전체 피드 수 (제거 4 + 추가 8 후 40~45 범위)", () => {
+test("Phase 1: 전체 피드 수 (40~50 범위)", () => {
   assert.ok(
-    RSS_FEEDS.length >= 40 && RSS_FEEDS.length <= 45,
-    `RSS_FEEDS.length = ${RSS_FEEDS.length} (40~45 범위 기대)`
+    RSS_FEEDS.length >= 40 && RSS_FEEDS.length <= 50,
+    `RSS_FEEDS.length = ${RSS_FEEDS.length} (40~50 범위 기대)`
   );
+});
+
+test("Phase 1: 추가 한국 매체 4종(네이버 D2 / 카카오 / LINE / 요즘IT) 존재", () => {
+  for (const url of [
+    "https://d2.naver.com/d2.atom",
+    "https://tech.kakao.com/feed/",
+    "https://engineering.linecorp.com/ko/feed/",
+    "https://yozm.wishket.com/magazine/rss/",
+  ]) {
+    const feed = findFeed(url);
+    assert.ok(feed, `한국 RSS ${url} 누락`);
+    assert.equal(feed.lang, "ko");
+  }
 });

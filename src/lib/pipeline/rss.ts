@@ -56,6 +56,11 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { url: "https://toss.tech/rss.xml", title: "토스 기술 블로그", tier: "P0_CURATED", lang: "ko" },
   { url: "https://news.hada.io/rss/blog", title: "GeekNews Blog", tier: "P0_CURATED", lang: "ko" },
   { url: "https://techblog.woowahan.com/feed/", title: "우아한형제들 기술블로그", tier: "P0_CURATED", lang: "ko" },
+  // 추가 한국 매체 (한국어 비중 ≥18% 목표 충족, audit-A 한국 카탈로그)
+  { url: "https://d2.naver.com/d2.atom", title: "네이버 D2", tier: "P1_CONTEXT", lang: "ko" },
+  { url: "https://tech.kakao.com/feed/", title: "카카오 기술블로그", tier: "P1_CONTEXT", lang: "ko" },
+  { url: "https://engineering.linecorp.com/ko/feed/", title: "LINE Engineering", tier: "P1_CONTEXT", lang: "ko" },
+  { url: "https://yozm.wishket.com/magazine/rss/", title: "요즘IT", tier: "P1_CONTEXT", lang: "ko" },
 
   // ── P1_CONTEXT: AI 뉴스/분석/체인지로그 ───────────────────────────────────
   { url: "https://techcrunch.com/category/artificial-intelligence/feed/", title: "TechCrunch AI", tier: "P1_CONTEXT", lang: "en" },
