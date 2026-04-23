@@ -13,6 +13,23 @@ interface GdeltResponse {
   articles?: GdeltArticle[];
 }
 
+// audit-A#L298-321 / Phase 1 §3.2.6: GDELT 언어 라벨을 다언어 코드로 정규화.
+// "ja"/"zh"/"other"는 다운스트림이 우선 미사용이지만, 향후 Phase 2 language 축에서 활용 가능.
+function mapGdeltLang(s: string | undefined): "ko" | "en" | "ja" | "zh" | "other" {
+  switch ((s ?? "").toLowerCase()) {
+    case "korean":
+      return "ko";
+    case "english":
+      return "en";
+    case "japanese":
+      return "ja";
+    case "chinese":
+      return "zh";
+    default:
+      return "other";
+  }
+}
+
 function gdeltDateFormat(date: Date): string {
   return date.toISOString().replace(/[-:T]/g, "").slice(0, 14);
 }
@@ -74,7 +91,7 @@ export async function collectGdeltItems(windowHours = 72): Promise<RssItem[]> {
           new URL(article.url).hostname.replace(/^www\./, ""),
         feedTitle: "GDELT",
         tier: "P1_CONTEXT" as const,
-        lang: article.language === "Korean" ? "ko" : "en",
+        lang: mapGdeltLang(article.language),
       });
     }
 

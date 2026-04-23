@@ -6,7 +6,7 @@ export interface RssFeedConfig {
   url: string;
   title: string;
   tier: "P0_CURATED" | "P1_CONTEXT" | "P2_RAW" | "COMMUNITY";
-  lang?: "ko" | "en";
+  lang?: "ko" | "en" | "ja" | "zh" | "other";
 }
 
 export interface RssRankingSignal {
@@ -41,15 +41,21 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { url: "https://openai.com/blog/rss.xml", title: "OpenAI Blog", tier: "P0_CURATED", lang: "en" },
   { url: "https://www.anthropic.com/rss.xml", title: "Anthropic Blog", tier: "P0_CURATED", lang: "en" },
   { url: "https://huggingface.co/blog/feed.xml", title: "HuggingFace Blog", tier: "P0_CURATED", lang: "en" },
-  { url: "https://research.google/blog/rss/", title: "Google Research Blog", tier: "P0_CURATED", lang: "en" },
   { url: "https://bullrich.dev/tldr-rss/ai.rss", title: "TLDR AI", tier: "P0_CURATED", lang: "en" },
-  { url: "https://www.technologyreview.com/feed/", title: "MIT Technology Review", tier: "P0_CURATED", lang: "en" },
   // 리서치 페이퍼 (일간 AI 논문)
   { url: "https://papers.takara.ai/api/feed", title: "HF Daily Papers (Takara)", tier: "P0_CURATED", lang: "en" },
   // 뉴스레터 (큐레이션)
   { url: "https://www.bensbites.com/feed", title: "Ben's Bites", tier: "P0_CURATED", lang: "en" },
   // 개발 플랫폼 공식 블로그
   { url: "https://github.blog/feed/", title: "GitHub Blog", tier: "P0_CURATED", lang: "en" },
+  // 바이브코딩 에디터 / 배포 플랫폼 changelog (audit-A#L205-220)
+  { url: "https://zed.dev/blog.rss", title: "Zed Blog", tier: "P0_CURATED", lang: "en" },
+  { url: "https://blog.replit.com/rss", title: "Replit Blog", tier: "P0_CURATED", lang: "en" },
+  { url: "https://vercel.com/changelog/rss.xml", title: "Vercel Changelog", tier: "P0_CURATED", lang: "en" },
+  // 한국 기술 블로그 (audit-A#L259-265)
+  { url: "https://toss.tech/rss.xml", title: "토스 기술 블로그", tier: "P0_CURATED", lang: "ko" },
+  { url: "https://news.hada.io/rss/blog", title: "GeekNews Blog", tier: "P0_CURATED", lang: "ko" },
+  { url: "https://techblog.woowahan.com/feed/", title: "우아한형제들 기술블로그", tier: "P0_CURATED", lang: "ko" },
 
   // ── P1_CONTEXT: AI 뉴스/분석/체인지로그 ───────────────────────────────────
   { url: "https://techcrunch.com/category/artificial-intelligence/feed/", title: "TechCrunch AI", tier: "P1_CONTEXT", lang: "en" },
@@ -64,15 +70,19 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { url: "https://www.interconnects.ai/feed", title: "Interconnects", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://developer.nvidia.com/blog/feed", title: "NVIDIA Technical Blog", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://news.hada.io/rss/news", title: "GeekNews", tier: "P1_CONTEXT", lang: "ko" },
+  // P0 → P1 강등 (audit-A#L289-290): 발행 빈도 낮음 / 바이브코딩 직결성 약함
+  { url: "https://research.google/blog/rss/", title: "Google Research Blog", tier: "P1_CONTEXT", lang: "en" },
+  { url: "https://www.technologyreview.com/feed/", title: "MIT Technology Review", tier: "P1_CONTEXT", lang: "en" },
   // 오픈소스/프레임워크 체인지로그
   { url: "https://changelog.langchain.com/feed", title: "LangChain Changelog", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://github.com/crewAIInc/crewAI/releases.atom", title: "CrewAI Releases", tier: "P1_CONTEXT", lang: "en" },
   // 개발자 도구 전문 매체
   { url: "https://lobste.rs/rss", title: "Lobsters", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://changelog.com/feed", title: "Changelog", tier: "P1_CONTEXT", lang: "en" },
-  { url: "https://blog.logrocket.com/feed/", title: "LogRocket Blog", tier: "P1_CONTEXT", lang: "en" },
-  { url: "https://www.phoronix.com/rss.php", title: "Phoronix", tier: "P1_CONTEXT", lang: "en" },
-  { url: "https://www.producthunt.com/feed", title: "Product Hunt", tier: "P1_CONTEXT", lang: "en" },
+  // 제거 (audit-A#L283-286):
+  //   - LogRocket Blog (마케팅 콘텐츠 편향)
+  //   - Phoronix (리눅스 벤치마크, AI 무관)
+  //   - Product Hunt RSS (Product Hunt GraphQL `product_hunt_top_source.ts`와 중복)
   // 앱/에이전트/배포 생태계
   { url: "https://vercel.com/atom", title: "Vercel Blog", tier: "P1_CONTEXT", lang: "en" },
   // 코드 인텔리전스/Cody
@@ -93,7 +103,10 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { url: "https://dev.to/feed/tag/ai", title: "Dev.to AI", tier: "COMMUNITY", lang: "en" },
   { url: "https://dev.to/feed/tag/vibecoding", title: "Dev.to Vibe Coding", tier: "COMMUNITY", lang: "en" },
   { url: "https://towardsai.net/feed", title: "Towards AI", tier: "COMMUNITY", lang: "en" },
-  { url: "https://hnrss.org/newest?q=LLM+AI", title: "HackerNews AI", tier: "COMMUNITY", lang: "en" },
+  // 제거 (audit-A#L283): HackerNews AI (hnrss) — `hn_source.ts` Algolia 경로와 100% 중복
+  // 추가 (audit-A#L199-200): Show HN / GitHub Trending RSS
+  { url: "https://hnrss.org/show?points=30", title: "Show HN (AI/Dev)", tier: "COMMUNITY", lang: "en" },
+  { url: "https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml", title: "GitHub Trending", tier: "COMMUNITY", lang: "en" },
 ];
 
 // ─── Parser ───────────────────────────────────────────────────────────────────

@@ -31,6 +31,12 @@ const YOUTUBE_CHANNELS: YouTubeChannel[] = [
   { channelId: "UCQNE2JmbasNYbjGAcuBiRRg", name: "조코딩 JoCoding" },
   { channelId: "UCxj3eVTAv9KLdrowXcuCFDQ", name: "빌더 조쉬 Builder Josh" },
   { channelId: "UCxZ2AlaT0hOmxzZVbF_j_Sw", name: "코드팩토리" },
+  // TODO(OQ-3, audit-A#L728-742): 한국 바이브코더 추천 4채널 추가 예정.
+  //   - 안될공학
+  //   - 노마드코더 (Nomad Coders)
+  //   - 드림코딩 by 엘리
+  //   - 메타코드M
+  // channelId 확정 후 위 배열에 4행 추가하면 됨 (yt-dlp 또는 YouTube Data API 사용).
 ];
 
 // ─── Parser ──────────────────────────────────────────────────────────────────

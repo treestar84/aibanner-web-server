@@ -10,6 +10,11 @@ const SUBREDDITS = [
   "ClaudeAI",
   "ChatGPTCoding",
   "ollama",
+  // audit-A#L239-240, #L344: 인디 빌더 / 신규 도구 발굴 채널
+  "SideProject",
+  "OpenAI",
+  "aipromptprogramming",
+  "IndieHacking",
 ];
 
 interface RedditPost {

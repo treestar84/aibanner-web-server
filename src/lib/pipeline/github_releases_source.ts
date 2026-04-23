@@ -5,6 +5,7 @@ import type { RssItem } from "./rss";
 const TRACKED_REPOS: string[] = [
   "ollama/ollama",
   "langchain-ai/langchain",
+  "langchain-ai/langgraph", // audit-A#L222 (그래프 기반 에이전트)
   "crewAIInc/crewAI",
   "microsoft/autogen",
   "run-llama/llama_index",
@@ -18,6 +19,9 @@ const TRACKED_REPOS: string[] = [
   "google/generative-ai-python",
   "All-Hands-AI/OpenHands",
   "continuedev/continue",
+  "Aider-AI/aider", // audit-A#L218 (CLI 기반 페어 코딩)
+  "BerriAI/litellm", // audit-A#L219 (LLM 라우터)
+  "open-webui/open-webui", // audit-A#L220 (셀프 호스팅 LLM UI)
 ];
 
 // ─── Types ───────────────────────────────────────────────────────────────────

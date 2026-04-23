@@ -108,3 +108,107 @@ test("RSS_FEEDS has no duplicate URLs", () => {
   const unique = new Set(urls);
   assert.equal(urls.length, unique.size, "Duplicate URLs found in RSS_FEEDS");
 });
+
+// ─── Phase 1 (2026-04-23) — Subtask A 카탈로그 정비 결과 검증 ────────────────
+// PRD: web-server/docs/plans/2026-04-23-pipeline-quality-implementation-plan.md §3.2.1
+
+test("Phase 1: 바이브코딩 에디터 P0 — Zed Blog", () => {
+  const feed = findFeed("https://zed.dev/blog.rss");
+  assert.ok(feed, "Zed Blog feed should exist");
+  assert.equal(feed.tier, "P0_CURATED");
+  assert.equal(feed.lang, "en");
+});
+
+test("Phase 1: 바이브코딩 에디터 P0 — Replit Blog", () => {
+  const feed = findFeed("https://blog.replit.com/rss");
+  assert.ok(feed, "Replit Blog feed should exist");
+  assert.equal(feed.tier, "P0_CURATED");
+});
+
+test("Phase 1: 바이브코딩 에디터 P0 — Vercel Changelog", () => {
+  const feed = findFeed("https://vercel.com/changelog/rss.xml");
+  assert.ok(feed, "Vercel Changelog feed should exist");
+  assert.equal(feed.tier, "P0_CURATED");
+});
+
+test("Phase 1: 한국 기술 블로그 P0 — 토스", () => {
+  const feed = findFeed("https://toss.tech/rss.xml");
+  assert.ok(feed, "토스 기술 블로그 feed should exist");
+  assert.equal(feed.tier, "P0_CURATED");
+  assert.equal(feed.lang, "ko");
+});
+
+test("Phase 1: 한국 기술 블로그 P0 — GeekNews Blog", () => {
+  const feed = findFeed("https://news.hada.io/rss/blog");
+  assert.ok(feed, "GeekNews Blog feed should exist");
+  assert.equal(feed.tier, "P0_CURATED");
+  assert.equal(feed.lang, "ko");
+});
+
+test("Phase 1: 한국 기술 블로그 P0 — 우아한형제들", () => {
+  const feed = findFeed("https://techblog.woowahan.com/feed/");
+  assert.ok(feed, "우아한형제들 기술블로그 feed should exist");
+  assert.equal(feed.tier, "P0_CURATED");
+  assert.equal(feed.lang, "ko");
+});
+
+test("Phase 1: COMMUNITY 추가 — Show HN", () => {
+  const feed = findFeed("https://hnrss.org/show?points=30");
+  assert.ok(feed, "Show HN feed should exist");
+  assert.equal(feed.tier, "COMMUNITY");
+});
+
+test("Phase 1: COMMUNITY 추가 — GitHub Trending", () => {
+  const feed = findFeed("https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml");
+  assert.ok(feed, "GitHub Trending feed should exist");
+  assert.equal(feed.tier, "COMMUNITY");
+});
+
+test("Phase 1: P0 → P1 강등 — Google Research Blog", () => {
+  const feed = findFeed("https://research.google/blog/rss/");
+  assert.ok(feed, "Google Research Blog feed should still exist");
+  assert.equal(feed.tier, "P1_CONTEXT", "should be demoted to P1");
+});
+
+test("Phase 1: P0 → P1 강등 — MIT Technology Review", () => {
+  const feed = findFeed("https://www.technologyreview.com/feed/");
+  assert.ok(feed, "MIT Technology Review feed should still exist");
+  assert.equal(feed.tier, "P1_CONTEXT", "should be demoted to P1");
+});
+
+test("Phase 1: 제거 — LogRocket Blog (마케팅 편향)", () => {
+  const feed = findFeed("https://blog.logrocket.com/feed/");
+  assert.equal(feed, undefined, "LogRocket Blog should be removed");
+});
+
+test("Phase 1: 제거 — Phoronix (AI 무관)", () => {
+  const feed = findFeed("https://www.phoronix.com/rss.php");
+  assert.equal(feed, undefined, "Phoronix should be removed");
+});
+
+test("Phase 1: 제거 — Product Hunt RSS (GraphQL 경로와 중복)", () => {
+  const feed = findFeed("https://www.producthunt.com/feed");
+  assert.equal(feed, undefined, "Product Hunt RSS should be removed (use GraphQL source)");
+});
+
+test("Phase 1: 제거 — HackerNews AI hnrss (hn_source.ts와 중복)", () => {
+  const feed = findFeed("https://hnrss.org/newest?q=LLM+AI");
+  assert.equal(feed, undefined, "HackerNews AI hnrss should be removed");
+});
+
+test("Phase 1: 한국어 매체 비중 (ko ≥ 5; PRD 목표 ≥18% 미달은 §11 OQ로 추적)", () => {
+  const koFeeds = RSS_FEEDS.filter((f) => f.lang === "ko");
+  assert.ok(
+    koFeeds.length >= 5,
+    `한국어 매체 ${koFeeds.length}건 (5건 이상이어야 함). 현재 비중: ${(
+      (koFeeds.length / RSS_FEEDS.length) * 100
+    ).toFixed(1)}%`
+  );
+});
+
+test("Phase 1: 전체 피드 수 (제거 4 + 추가 8 후 40~45 범위)", () => {
+  assert.ok(
+    RSS_FEEDS.length >= 40 && RSS_FEEDS.length <= 45,
+    `RSS_FEEDS.length = ${RSS_FEEDS.length} (40~45 범위 기대)`
+  );
+});
