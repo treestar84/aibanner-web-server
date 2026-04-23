@@ -5,6 +5,7 @@ import {
   getTopKeywords,
 } from "@/lib/db/queries";
 import { normalizePrimaryType } from "@/lib/pipeline/source_category";
+import { buildSnsDeeplinks } from "@/lib/pipeline/sns_deeplinks";
 import { parsePipelineMode } from "@/lib/pipeline/mode";
 import { buildFreshness, cacheControlByMode } from "@/lib/api/freshness";
 import { filterActiveSnapshotKeywords } from "@/lib/manual-keywords";
@@ -86,6 +87,8 @@ export async function GET(req: NextRequest) {
                   imageUrl: kw.top_source_image_url ?? "/images/default-thumbnail.png",
                 }
               : null,
+            // Phase 3 §5.2.6: SNS·검색 deeplink 4종 (keyword detail 응답과 동일 shape)
+            deeplinks: buildSnsDeeplinks(localizedKeyword),
           };
         }),
       },
