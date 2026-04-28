@@ -45,3 +45,7 @@ local-tests/
 
 # OMC runtime state (audit/PRD/team 세션 임시 파일)
 .omc/
+.omx/
+
+# 일회성 디버그/검증 스크립트 (`_` prefix)
+scripts/_*.ts

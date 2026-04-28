@@ -38,6 +38,54 @@ interface RedditListing {
 
 type RedditEndpoint = "hot" | "rising";
 
+// Reddit blocks generic / cloud-egress User-Agents with 403/429.
+// Use the Reddit-recommended UA format: "platform:appId:version (by /u/owner)".
+// Override via env REDDIT_USER_AGENT for production accounts.
+const REDDIT_USER_AGENT =
+  process.env.REDDIT_USER_AGENT ??
+  "web:com.aitrendnews.widget:v1.0 (by /u/aitrendnews)";
+
+// Optional OAuth (script app). When REDDIT_CLIENT_ID/SECRET are set we authenticate
+// against oauth.reddit.com which is far less likely to be blocked from cloud IPs.
+const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID ?? "";
+const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET ?? "";
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+async function getRedditAccessToken(): Promise<string | null> {
+  if (!REDDIT_CLIENT_ID || !REDDIT_CLIENT_SECRET) return null;
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 30_000) {
+    return cachedToken.token;
+  }
+  try {
+    const basic = Buffer.from(
+      `${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`
+    ).toString("base64");
+    const res = await fetch("https://www.reddit.com/api/v1/access_token", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basic}`,
+        "User-Agent": REDDIT_USER_AGENT,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) {
+      console.warn(`[reddit_source] OAuth token HTTP ${res.status}`);
+      return null;
+    }
+    const json = (await res.json()) as { access_token: string; expires_in: number };
+    cachedToken = {
+      token: json.access_token,
+      expiresAt: Date.now() + json.expires_in * 1000,
+    };
+    return cachedToken.token;
+  } catch (err) {
+    console.warn("[reddit_source] OAuth token failed:", (err as Error).message);
+    return null;
+  }
+}
+
 async function fetchSubreddit(
   subreddit: string,
   cutoff: Date,
@@ -45,14 +93,22 @@ async function fetchSubreddit(
 ): Promise<RssItem[]> {
   try {
     const limit = endpoint === "rising" ? 15 : 30;
-    const res = await fetch(
-      `https://www.reddit.com/r/${subreddit}/${endpoint}.json?limit=${limit}`,
-      {
-        headers: { "User-Agent": "AI-Trend-Widget/1.0" },
-        signal: AbortSignal.timeout(10000),
-      }
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const accessToken = await getRedditAccessToken();
+    const baseUrl = accessToken
+      ? `https://oauth.reddit.com/r/${subreddit}/${endpoint}?limit=${limit}&raw_json=1`
+      : `https://www.reddit.com/r/${subreddit}/${endpoint}.json?limit=${limit}&raw_json=1`;
+
+    const headers: Record<string, string> = { "User-Agent": REDDIT_USER_AGENT };
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+    const res = await fetch(baseUrl, {
+      headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) {
+      // Surface the status (401/403/429 vs 5xx) so we can tell IP block from rate limit.
+      throw new Error(`HTTP ${res.status}${accessToken ? " (oauth)" : " (anon)"}`);
+    }
 
     const data: RedditListing = await res.json();
 

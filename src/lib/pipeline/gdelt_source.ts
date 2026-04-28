@@ -94,34 +94,55 @@ async function fetchGdeltOnce(
   return items;
 }
 
+// GDELT enforces ~5s/req per IP. Concurrent en+ko calls returned HTTP 429
+// ("Please limit requests to one every 5 seconds"). Run sequentially with a
+// safety margin (6s) instead — repeated violations push GDELT into a longer
+// soft-ban that no shorter sleep recovers from.
+const GDELT_RATE_LIMIT_MS = 6000;
+
 export async function collectGdeltItems(windowHours = 72): Promise<RssItem[]> {
   try {
     const dynamicQuery = await buildDynamicQuery();
-    const gdeltQuery = dynamicQuery
+    // GDELT 제약:
+    //   1) OR 묶음은 반드시 괄호로 감싸야 함 — 없으면 200 text/html로
+    //      "Queries containing OR'd terms must be surrounded by ()." 거부.
+    //   2) 모든 phrase가 충분히 길어야 함 — 하나라도 짧으면
+    //      "The specified phrase is too short." 로 전체 거부 (예: "AI", "GPT").
+    //   3) 한 번에 너무 많은 토큰을 보내면 sourcelang 옵션과 충돌해 느려짐.
+    const MIN_PHRASE_LEN = 4;
+    const gdeltTerms = dynamicQuery
       .split(" OR ")
-      .map((term) => `"${term.replace(/^"|"$/g, "").trim()}"`)
-      .join(" OR ");
+      .map((t) => t.replace(/^"|"$/g, "").trim())
+      .filter((t) => t.length >= MIN_PHRASE_LEN);
+    if (gdeltTerms.length === 0) {
+      console.warn("[gdelt_source] No terms long enough after filter; skipping");
+      return [];
+    }
+    const gdeltQuery = `(${gdeltTerms.map((t) => `"${t}"`).join(" OR ")})`;
 
-    const [enResult, koResult] = await Promise.allSettled([
-      fetchGdeltOnce(gdeltQuery, windowHours),
-      fetchGdeltOnce(gdeltQuery, windowHours, { sourcelang: "kor" }),
-    ]);
+    const enItems = await fetchGdeltOnce(gdeltQuery, windowHours).catch((err) => {
+      console.warn("[gdelt_source] en failed:", (err as Error).message);
+      return [] as RssItem[];
+    });
+    await new Promise((r) => setTimeout(r, GDELT_RATE_LIMIT_MS));
+    const koItems = await fetchGdeltOnce(gdeltQuery, windowHours, { sourcelang: "kor" }).catch(
+      (err) => {
+        console.warn("[gdelt_source] ko failed:", (err as Error).message);
+        return [] as RssItem[];
+      }
+    );
 
     const merged: RssItem[] = [];
     const seen = new Set<string>();
-    for (const result of [enResult, koResult]) {
-      if (result.status !== "fulfilled") {
-        console.warn("[gdelt_source] partial failure:", (result.reason as Error)?.message);
-        continue;
-      }
-      for (const item of result.value) {
-        if (seen.has(item.link)) continue;
-        seen.add(item.link);
-        merged.push(item);
-      }
+    for (const item of [...enItems, ...koItems]) {
+      if (seen.has(item.link)) continue;
+      seen.add(item.link);
+      merged.push(item);
     }
 
-    console.log(`[gdelt_source] Got ${merged.length} items (en + ko merged)`);
+    console.log(
+      `[gdelt_source] Got ${merged.length} items (en=${enItems.length} ko=${koItems.length})`
+    );
     return merged;
   } catch (err) {
     console.warn("[gdelt_source] Failed:", (err as Error).message);
