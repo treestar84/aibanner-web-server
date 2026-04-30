@@ -38,6 +38,12 @@ const SOCIAL_DOMAINS = new Set([
   "hashnode.com",
   "discord.com",
   "discord.gg",
+  "blog.naver.com",
+  "cafe.naver.com",
+  "m.blog.naver.com",
+  "m.cafe.naver.com",
+  "tistory.com",
+  "brunch.co.kr",
 ]);
 
 const DATA_DOMAINS = new Set([

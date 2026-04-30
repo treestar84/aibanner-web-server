@@ -13,9 +13,9 @@ interface ScoreWeights {
 }
 
 const DEFAULT_WEIGHTS: ScoreWeights = {
-  recency: 0.28,
-  frequency: 0.12,
-  authority: 0.08,
+  recency: 0.24,
+  frequency: 0.10,
+  authority: 0.14,
   velocity: 0.30,
   engagement: 0.22,
   internal: 0.00,
@@ -41,7 +41,7 @@ const TIER_AUTHORITY: Record<string, number> = {
   P0_CURATED: 1.0,
   P1_CONTEXT: 0.6,
   P2_RAW: 0.3,
-  COMMUNITY: 0.2,
+  COMMUNITY: 0.15,
 };
 
 // ─── Scoring ──────────────────────────────────────────────────────────────────
