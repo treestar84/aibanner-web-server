@@ -17,12 +17,120 @@ export interface TavilySource {
   provider?: "tavily" | "naver";
 }
 
-// ─── Client ───────────────────────────────────────────────────────────────────
+// ─── Client / API key pool ───────────────────────────────────────────────────
 
-function getClient() {
-  const apiKey = process.env.TAVILY_API_KEY;
-  if (!apiKey) return null;
-  return tavily({ apiKey });
+type TavilyClient = ReturnType<typeof tavily>;
+type TavilyFailureKind = "quota" | "rate_limit" | "other";
+
+interface TavilyKeyState {
+  disabledUntilMs: number;
+  reason: TavilyFailureKind;
+  failureCount: number;
+}
+
+const tavilyKeyStates = new Map<string, TavilyKeyState>();
+
+function splitEnvList(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+export function resolveTavilyApiKeys(
+  env?: { TAVILY_API_KEY?: string; TAVILY_API_KEYS?: string }
+): string[] {
+  const source = env ?? {
+    TAVILY_API_KEY: process.env.TAVILY_API_KEY,
+    TAVILY_API_KEYS: process.env.TAVILY_API_KEYS,
+  };
+  const keys = [
+    ...splitEnvList(source.TAVILY_API_KEY),
+    ...splitEnvList(source.TAVILY_API_KEYS),
+  ];
+  return Array.from(new Set(keys));
+}
+
+function maskTavilyKey(apiKey: string): string {
+  if (apiKey.length <= 8) return "****";
+  return `${apiKey.slice(0, 4)}…${apiKey.slice(-4)}`;
+}
+
+function getErrorField(error: unknown, key: string): unknown {
+  if (error && typeof error === "object" && key in error) {
+    return (error as Record<string, unknown>)[key];
+  }
+  return undefined;
+}
+
+export function classifyTavilyFailure(error: unknown): TavilyFailureKind {
+  const status = getErrorField(error, "status") ?? getErrorField(error, "statusCode");
+  const code = String(getErrorField(error, "code") ?? "").toLowerCase();
+  const name = String(getErrorField(error, "name") ?? "").toLowerCase();
+  const message = error instanceof Error
+    ? error.message.toLowerCase()
+    : String(getErrorField(error, "message") ?? error ?? "").toLowerCase();
+  const combined = `${code} ${name} ${message}`;
+
+  if (
+    combined.includes("quota") ||
+    combined.includes("credit") ||
+    combined.includes("billing") ||
+    combined.includes("insufficient") ||
+    combined.includes("exceeded")
+  ) {
+    return "quota";
+  }
+
+  if (
+    Number(status) === 429 ||
+    combined.includes("rate limit") ||
+    combined.includes("ratelimit") ||
+    combined.includes("too many requests") ||
+    combined.includes("throttle")
+  ) {
+    return "rate_limit";
+  }
+
+  return "other";
+}
+
+function getTavilyCooldownMs(kind: TavilyFailureKind): number {
+  if (kind === "quota") {
+    return TAVILY_QUOTA_COOLDOWN_HOURS * 60 * 60 * 1000;
+  }
+  if (kind === "rate_limit") {
+    return TAVILY_RATE_LIMIT_COOLDOWN_MINUTES * 60 * 1000;
+  }
+  return 0;
+}
+
+function markTavilyKeyFailure(apiKey: string, kind: TavilyFailureKind): void {
+  const cooldownMs = getTavilyCooldownMs(kind);
+  if (cooldownMs <= 0) return;
+
+  const previous = tavilyKeyStates.get(apiKey);
+  tavilyKeyStates.set(apiKey, {
+    disabledUntilMs: Date.now() + cooldownMs,
+    reason: kind,
+    failureCount: (previous?.failureCount ?? 0) + 1,
+  });
+}
+
+function isTavilyKeyAvailable(apiKey: string): boolean {
+  const state = tavilyKeyStates.get(apiKey);
+  if (!state) return true;
+  if (Date.now() >= state.disabledUntilMs) {
+    tavilyKeyStates.delete(apiKey);
+    return true;
+  }
+  return false;
+}
+
+function getTavilyKeyAttempts(): Array<{ apiKey: string; client: TavilyClient }> {
+  const keys = resolveTavilyApiKeys().filter(isTavilyKeyAvailable);
+  const limitedKeys = keys.slice(0, TAVILY_MAX_KEY_ATTEMPTS);
+  return limitedKeys.map((apiKey) => ({ apiKey, client: tavily({ apiKey }) }));
 }
 
 function extractDomain(url: string): string {
@@ -70,35 +178,69 @@ const TAVILY_BROAD_RESULTS = parsePositiveIntEnv(
   1,
   16
 );
+const TAVILY_MAX_KEY_ATTEMPTS = parsePositiveIntEnv(
+  process.env.TAVILY_MAX_KEY_ATTEMPTS,
+  2,
+  1,
+  10
+);
+const TAVILY_RATE_LIMIT_COOLDOWN_MINUTES = parsePositiveIntEnv(
+  process.env.TAVILY_RATE_LIMIT_COOLDOWN_MINUTES,
+  15,
+  1,
+  1440
+);
+const TAVILY_QUOTA_COOLDOWN_HOURS = parsePositiveIntEnv(
+  process.env.TAVILY_QUOTA_COOLDOWN_HOURS,
+  24,
+  1,
+  744
+);
 
 async function fetchByQuery(
-  client: ReturnType<typeof tavily> | null,
   query: string,
   typeHint: SourceType,
   options: { maxResults: number; timeRange: "day" | "week" | "month" }
 ): Promise<TavilySource[]> {
-  if (!client) return [];
+  const attempts = getTavilyKeyAttempts();
+  if (attempts.length === 0) return [];
 
-  try {
-    const res = await client.search(query, {
-      searchDepth: "basic",
-      maxResults: options.maxResults,
-      timeRange: options.timeRange,
-      includeImages: false,
-    });
-    return res.results.map((r) => ({
-      title: r.title,
-      url: r.url,
-      domain: extractDomain(r.url),
-      snippet: (r.content ?? "").slice(0, 220),
-      imageUrl: null,
-      publishedAt: r.publishedDate ?? null,
-      type: typeHint,
-      provider: "tavily",
-    }));
-  } catch {
-    return [];
+  for (const { apiKey, client } of attempts) {
+    try {
+      const res = await client.search(query, {
+        searchDepth: "basic",
+        maxResults: options.maxResults,
+        timeRange: options.timeRange,
+        includeImages: false,
+      });
+      return res.results.map((r) => ({
+        title: r.title,
+        url: r.url,
+        domain: extractDomain(r.url),
+        snippet: (r.content ?? "").slice(0, 220),
+        imageUrl: null,
+        publishedAt: r.publishedDate ?? null,
+        type: typeHint,
+        provider: "tavily",
+      }));
+    } catch (error) {
+      const failureKind = classifyTavilyFailure(error);
+      if (failureKind !== "quota" && failureKind !== "rate_limit") {
+        console.warn(
+          `[tavily] Search failed for query "${query}": ${error instanceof Error ? error.message : String(error)}`
+        );
+        return [];
+      }
+
+      markTavilyKeyFailure(apiKey, failureKind);
+      console.warn(
+        `[tavily] ${failureKind} for key ${maskTavilyKey(apiKey)}; trying fallback key if available.`
+      );
+    }
   }
+
+  console.warn(`[tavily] All available Tavily keys failed for query "${query}".`);
+  return [];
 }
 
 function normalizeUrlKey(url: string): string {
@@ -151,7 +293,6 @@ function exactMatchKeyword(keyword: string): string {
 export async function collectSources(
   keyword: string
 ): Promise<Record<SourceType, TavilySource[]>> {
-  const client = getClient();
   const exact = exactMatchKeyword(keyword);
 
   const newsQuery = `${exact} (news OR blog OR analysis OR article OR interview)`;
@@ -161,19 +302,19 @@ export async function collectSources(
   // 뉴스는 최근 1일 우선 수집 후, 부족하면 week로 보충
   const [naverSources, newsDay, socialSeed, dataSeed, broadSeed] = await Promise.all([
     collectNaverSources(keyword),
-    fetchByQuery(client, newsQuery, "news", {
+    fetchByQuery(newsQuery, "news", {
       maxResults: TAVILY_NEWS_RESULTS,
       timeRange: "day",
     }),
-    fetchByQuery(client, socialQuery, "social", {
+    fetchByQuery(socialQuery, "social", {
       maxResults: TAVILY_SOCIAL_RESULTS,
       timeRange: "month",
     }),
-    fetchByQuery(client, dataQuery, "data", {
+    fetchByQuery(dataQuery, "data", {
       maxResults: TAVILY_DATA_RESULTS,
       timeRange: "month",
     }),
-    fetchByQuery(client, exact, "news", {
+    fetchByQuery(exact, "news", {
       maxResults: TAVILY_BROAD_RESULTS,
       timeRange: "month",
     }),
@@ -182,7 +323,7 @@ export async function collectSources(
   // day 결과가 부족하면 week로 보충
   let newsSeed = newsDay;
   if (newsDay.length < TAVILY_NEWS_RESULTS) {
-    const newsWeek = await fetchByQuery(client, newsQuery, "news", {
+    const newsWeek = await fetchByQuery(newsQuery, "news", {
       maxResults: TAVILY_NEWS_RESULTS,
       timeRange: "week",
     });
