@@ -177,15 +177,37 @@ export function determinePrimaryType(sources: SourceLike[]): PrimaryType {
   }
 
   const firstCategory = classifySourceCategory(sources[0]);
-  const tieOrder: Record<PrimaryType, number> = {
+  const tieOrder = buildTieOrder(firstCategory);
+
+  let best = pickBestCategory(scores, tieOrder, ["news", "social", "data"]);
+
+  // Social is useful as an early signal, but it should not become the
+  // representative trust source when news/data evidence is also available.
+  // Keep social primary only for all-social source sets.
+  if (best === "social" && (scores.news > 0 || scores.data > 0)) {
+    best = pickBestCategory(scores, tieOrder, ["news", "data"]);
+  }
+
+  return best;
+}
+
+function buildTieOrder(firstCategory: PrimaryType): Record<PrimaryType, number> {
+  return {
     [firstCategory]: 0,
     social: firstCategory === "social" ? 0 : 1,
     data: firstCategory === "data" ? 0 : 2,
     news: firstCategory === "news" ? 0 : 3,
   };
+}
 
-  let best: PrimaryType = "news";
-  for (const category of ["news", "social", "data"] as const) {
+function pickBestCategory(
+  scores: Record<PrimaryType, number>,
+  tieOrder: Record<PrimaryType, number>,
+  categories: PrimaryType[]
+): PrimaryType {
+  let best = categories[0] ?? "news";
+
+  for (const category of categories) {
     if (scores[category] > scores[best]) {
       best = category;
       continue;
@@ -194,6 +216,7 @@ export function determinePrimaryType(sources: SourceLike[]): PrimaryType {
       best = category;
     }
   }
+
   return best;
 }
 

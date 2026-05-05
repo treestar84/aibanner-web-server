@@ -296,7 +296,7 @@ export async function collectSources(
   const exact = exactMatchKeyword(keyword);
 
   const newsQuery = `${exact} (news OR blog OR analysis OR article OR interview)`;
-  const socialQuery = `${exact} (site:threads.net OR site:reddit.com OR site:dev.to OR site:x.com OR site:twitter.com OR site:facebook.com OR site:instagram.com OR site:tiktok.com OR site:clien.net)`;
+  const socialQuery = `${exact} (site:threads.net OR site:reddit.com OR site:dev.to OR site:x.com OR site:twitter.com OR site:facebook.com OR site:clien.net)`;
   const dataQuery = `${exact} (site:youtube.com OR site:youtu.be OR site:docs.google.com OR site:drive.google.com OR site:arxiv.org OR site:openreview.net OR filetype:pdf OR dataset OR research paper OR benchmark)`;
 
   // 뉴스는 최근 1일 우선 수집 후, 부족하면 week로 보충
