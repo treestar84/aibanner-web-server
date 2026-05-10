@@ -158,6 +158,11 @@ function isNonAiTopic(keyword: string): boolean {
   return [...NON_AI_TOPICS].some((t) => lower.includes(t));
 }
 
+// ─── GitHub owner/repo slug 감지 ────────────────────────────────────────────
+function isGithubRepoSlug(keyword: string): boolean {
+  return /^[\w.-]+\/[\w.-]+$/.test(keyword.trim());
+}
+
 // ─── 한국어 음차 잔여 감지 ──────────────────────────────────────────────────
 function hasKoreanTransliteration(keyword: string): boolean {
   const tokens = keyword.split(/\s+/);
@@ -1454,6 +1459,10 @@ export async function normalizeKeywords(
     }
     if (isMediaOutlet(kw.keyword)) {
       console.log(`[keywords] DROP(media_outlet)   : "${kw.keyword}"`);
+      continue;
+    }
+    if (isGithubRepoSlug(kw.keyword)) {
+      console.log(`[keywords] DROP(github_repo_slug): "${kw.keyword}"`);
       continue;
     }
     if (hasKoreanTransliteration(kw.keyword)) {

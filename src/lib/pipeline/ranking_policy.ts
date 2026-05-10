@@ -357,6 +357,13 @@ export function calculateKeywordPolicyDelta(
 
   if (isWeakVersionOnly) delta -= 0.04;
 
+  const isLowSignalSingleSource =
+    item.keyword.candidates.domains.size === 1 &&
+    item.score.engagement === 0 &&
+    item.score.authority <= 0.3;
+
+  if (isLowSignalSingleSource) delta -= 0.08;
+
   return parseFloat(delta.toFixed(4));
 }
 
