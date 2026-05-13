@@ -49,3 +49,6 @@ local-tests/
 
 # 일회성 디버그/검증 스크립트 (`_` prefix)
 scripts/_*.ts
+
+# gstack 보안 점검 리포트 (로컬 전용)
+.gstack/

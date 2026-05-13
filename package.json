@@ -13,23 +13,23 @@
     "admin:replay-ranking": "npx tsx scripts/admin/replay-ranking-snapshot.ts"
   },
   "dependencies": {
-    "next": "^15.1.7",
+    "@neondatabase/serverless": "^0.10.4",
+    "@tavily/core": "^0.3.0",
+    "cheerio": "^1.0.0",
+    "next": "^15.3.2",
+    "openai": "^4.86.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@neondatabase/serverless": "^0.10.4",
-    "openai": "^4.86.1",
-    "@tavily/core": "^0.3.0",
-    "rss-parser": "^3.13.0",
-    "cheerio": "^1.0.0"
+    "rss-parser": "^3.13.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "typescript": "^5.7.3",
-    "tsx": "^4.19.2",
+    "autoprefixer": "^10.4.20",
     "dotenv": "^16.4.7",
     "tailwindcss": "^3.4.17",
-    "autoprefixer": "^10.4.20"
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
   }
 }
