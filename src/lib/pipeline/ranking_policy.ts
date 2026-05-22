@@ -342,9 +342,26 @@ export function calculateKeywordPolicyDelta(
   // 사유: 현행 +0.08/+0.06 등이 자연 score(~1.0) 대비 과도해 노이즈 키워드가 과대 부스팅되는 문제.
   if (meta.keywordKind === "incident") delta += 0.02;
   if (meta.keywordKind === "feature_event") delta += 0.02;
-  if (meta.keywordKind === "version_release") delta += 0.005;
 
-  if (meta.versionKind === "major") delta += 0.01;
+  if (meta.keywordKind === "version_release") {
+    // 중요한 릴리즈 조건: 권위 있는 소스 OR 여러 도메인 OR 커뮤니티 반응
+    const isSignificantRelease =
+      item.score.authority >= 0.6 ||
+      item.keyword.candidates.domains.size >= 3 ||
+      item.score.engagement > 0;
+
+    if (isSignificantRelease) {
+      if (meta.versionKind === "major") delta += 0.04;
+      else if (meta.versionKind === "minor") delta += 0.02;
+      else delta += 0.005;
+    } else {
+      // 단일 소스 + engagement 없는 낮은 단위 릴리즈 → 기존 수준 유지
+      delta += 0.005;
+    }
+  } else {
+    if (meta.versionKind === "major") delta += 0.01;
+  }
+
   if (meta.versionKind === "patch") delta -= 0.02;
   if (meta.versionKind === "build") delta -= 0.04;
 
@@ -459,8 +476,21 @@ export function calculateStabilityDelta(
   }
 
   const appearances = history?.appearances ?? 0;
-  if (appearances >= 2) {
-    delta += Math.min(0.01, (appearances - 1) * 0.01);
+  if (appearances >= 8 && appearances < 12) {
+    // 2~3일 연속 등장 (cron 4x/day 기준): velocity가 높으면 이슈 지속(Google I/O 타입), 낮으면 약한 유지
+    if (item.score.velocity >= 0.35) {
+      delta += 0.015;
+    } else {
+      delta += 0.005;
+    }
+  } else if (appearances >= 12) {
+    // 3일 이상 등장 (cron 4x/day 기준): velocity 낮으면 상시 검색어(evergreen) 판정 → 패널티
+    if (item.score.velocity < 0.35) {
+      delta -= 0.04;
+    } else {
+      // velocity 높으면 여전히 실제 이슈 → 약한 유지
+      delta += 0.005;
+    }
   }
 
   const isStale =
