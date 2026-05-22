@@ -19,11 +19,11 @@ RSS/API 수집 → 후보 추출 → AI 클러스터링 → 스코어링 → Tav
 
 ---
 
-## 1단계: RSS 수집 (`rss.ts`)
+## 1단계: 소스 수집 (`src/lib/pipeline/`)
 
 ### 피드 구성
 
-RSS 피드를 4개 티어로 분류합니다. 별도 API 수집기(Product Hunt Top, Reddit, GitHub, YouTube 등)는 `snapshot.ts`의 `SOURCE_PLANS`에서 함께 실행됩니다. 티어는 이후 스코어링의 authority 점수에 반영됩니다.
+RSS 피드를 4개 티어로 분류합니다. 별도 API/RSS 수집기(Product Hunt Top, Reddit, GitHub, YouTube, Techmeme, Google Alerts 등)는 `snapshot.ts`의 `SOURCE_PLANS`에서 함께 실행됩니다. 티어는 이후 스코어링의 authority 점수에 반영됩니다.
 
 | 티어 | 설명 | 예시 |
 |---|---|---|
@@ -31,6 +31,12 @@ RSS 피드를 4개 티어로 분류합니다. 별도 API 수집기(Product Hunt 
 | `P1_CONTEXT` | AI 전문 뉴스 미디어 | TechCrunch AI, VentureBeat AI, The Verge AI |
 | `P2_RAW` | 한국어 AI 뉴스 | ZDNet Korea 등 |
 | `COMMUNITY` | 커뮤니티/RSS | Dev.to, HackerNews AI, Towards AI |
+
+### 특수 RSS 소스
+
+- `Google AI (The Keyword)`: `rss.ts`의 일반 RSS 카탈로그에 `P1_CONTEXT`로 포함합니다. Google 공식 AI 발표 채널이지만 PR 성격이 있어 최상위 공식 릴리스보다 한 단계 낮게 취급합니다.
+- `Techmeme Big Tech`: `techmeme_source.ts`에서 Techmeme RSS를 읽고 Google, Microsoft, Apple, Meta, Amazon, NVIDIA, OpenAI, Anthropic 등 빅테크 키워드가 포함된 항목만 `P1_CONTEXT`로 수집합니다.
+- `Google Alerts`: `google_alerts_source.ts`의 `GOOGLE_ALERTS_FEEDS`에 하드코딩된 Alert RSS만 수집합니다. Google Alerts RSS URL은 쿼리만으로 만들 수 없으므로 google.com/alerts에서 Alert를 만든 뒤 RSS feed URL을 `url` 필드에 넣어야 합니다. Alert 피드는 검색 결과 기반이라 노이즈가 높으므로 기본 tier는 `P2_RAW`입니다.
 
 ### 수집 조건
 

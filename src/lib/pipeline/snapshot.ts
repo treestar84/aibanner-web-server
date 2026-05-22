@@ -8,6 +8,8 @@ import { collectGithubReleaseItems } from "./github_releases_source";
 import { collectChangelogItems } from "./changelog_source";
 import { collectProductHuntTopItems } from "./product_hunt_top_source";
 import { collectRedditItems } from "./reddit_source";
+import { collectTechmemeItems } from "./techmeme_source";
+import { collectGoogleAlertsItems } from "./google_alerts_source";
 import type { RssItem } from "./rss";
 import { normalizeKeywords } from "./keywords";
 import { rankKeywords } from "./scoring";
@@ -149,6 +151,8 @@ const SOURCE_PLANS: SourcePlan[] = [
   { key: "youtube", collect: (windowHours) => collectYoutubeItems(windowHours) },
   { key: "github_releases", collect: (windowHours) => collectGithubReleaseItems(windowHours) },
   { key: "changelog", collect: (windowHours) => collectChangelogItems(windowHours) },
+  { key: "techmeme", collect: (windowHours) => collectTechmemeItems(windowHours) },
+  { key: "google_alerts", collect: (windowHours) => collectGoogleAlertsItems(windowHours) },
   { key: "reddit", collect: (windowHours) => collectRedditItems(windowHours) },
 ];
 
