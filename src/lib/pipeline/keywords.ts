@@ -70,6 +70,8 @@ const GENERIC_WORDS = new Set([
   "음악", "마케팅", "애니메이션",
   "투자", "경제", "정책", "세액", "공제",
   "글로벌", "기술", "공격",
+  // "AI 기반 X" 보완 단어: AI_GENERIC_PREFIX_RE로 이관 → 비AI 접두어 복합구는 필터 제외
+  // 예: "AI 오케스트레이션" → 필터됨, "LangChain 오케스트레이션" → 통과
 ]);
 
 // 전치사/관사: 의미 없는 1-2자 기능어 (ai, ml 같은 기술 약어는 별도 GENERIC_WORDS로 처리)
@@ -105,7 +107,7 @@ function isGenericAiAgentPhrase(keyword: string): boolean {
 }
 
 // ─── "AI 기반/모델/투자/학습용 X" generic prefix filter ─────────────────────
-const AI_GENERIC_PREFIX_RE = /^ai[\s-](?:기반|모델|투자|학습용|활용|powered|based|driven|enabled)\s*/i;
+const AI_GENERIC_PREFIX_RE = /^ai[\s-](?:기반|모델|투자|학습용|활용|powered|based|driven|enabled|어시스턴트|오케스트레이션|문서|다중|기사|처리|헬스케어|효율성|지식)\s*/i;
 
 function isGenericAiPrefixPhrase(keyword: string): boolean {
   if (!AI_GENERIC_PREFIX_RE.test(keyword)) return false;
@@ -1093,24 +1095,44 @@ async function semanticMergeKeywords(
 // ─── Audience Relevance Filter ──────────────────────────────────────────────
 // 바이브코더/생성형AI 개발자 타겟 적합도를 LLM으로 판정, 낮은 점수 키워드 제거
 
-const AUDIENCE_RELEVANCE_PROMPT = `Score each keyword's relevance to developers who use generative AI tools (Cursor, Claude Code, Copilot, Windsurf, vibe coding).
+const AUDIENCE_RELEVANCE_PROMPT = `Score each keyword for vibe coders — developers who use Claude Code, Cursor, Copilot, Codex CLI, Windsurf daily.
 
-Rate 1-10:
-- 10: Directly about AI coding tools, new AI models, or developer-facing AI APIs
-- 7-9: AI tools, frameworks, or announcements developers would care about
-- 4-6: General AI industry news, somewhat relevant
-- 1-3: AI policy, regulation, business deals, hardware manufacturing, non-developer topics
+Answer TWO things per keyword: (1) is it relevant to vibe coders? (2) is it BREAKING/NEW today, or just always-relevant?
 
-Input: JSON array of keyword strings.
+Score 1-10 combining BOTH dimensions:
+- 9-10: Specific NEW release/tool/API vibe coders will immediately try or read about
+         e.g. "Google Antigravity 2.0", "Qwen3.7-Max", "Gemini CLI", "Codex CLI 출시", "Composer 2.5"
+- 7-8:  Important AI tool/model update, clearly developer-facing
+         e.g. "GPT-5 API", "Claude 4 Sonnet", "MCP server" (when new spec drops)
+- 5-6:  General AI developer news worth knowing, or perennial tools with TODAY's specific news
+         e.g. "DeepSeek R2", "Claude API" (only if major new feature announced today)
+- 3-4:  Always-relevant but NOT specifically trending today (perennial/evergreen)
+         e.g. "Claude API" (routine mentions), "MCP" (no new spec), "GitHub Copilot" (no update)
+- 1-2:  Not relevant: policy, regulation, healthcare, business deals, non-developer topics
+
+Input: JSON array of objects. Each object has "keyword" (string) and "titles" (array of 1-2 sample article titles mentioning that keyword).
+Use the titles to judge whether the keyword is NEW/BREAKING today or just perennial.
 Output: JSON object mapping keyword → score (number 1-10). Include ALL keywords.
-Example: {"Claude Code CLI": 10, "AI 반도체 수출규제": 2, "Gemini 2.5 Pro": 9}`;
+Example: {"Google Antigravity 2.0": 9, "Claude API": 4, "AI 반도체 수출규제": 1, "Qwen3.7-Max": 9}`;
 
 async function filterByAudienceRelevance(
-  keywords: NormalizedKeyword[]
+  keywords: NormalizedKeyword[],
+  items: RssItem[]
 ): Promise<NormalizedKeyword[]> {
   if (keywords.length <= 5) return keywords;
 
-  const keywordTexts = keywords.map((kw) => kw.keyword);
+  // 키워드별 대표 제목 1-2개를 포함해 LLM이 "오늘 새로운 소식인지" 판단할 수 있도록 컨텍스트 제공
+  const keywordContexts = keywords.map((kw) => {
+    const titledItems = [...kw.candidates.matchedItems]
+      .map((idx) => items[idx])
+      .filter(Boolean)
+      .sort((a, b) => (TIER_ORDER[a.tier] ?? 9) - (TIER_ORDER[b.tier] ?? 9));
+    return {
+      keyword: kw.keyword,
+      titles: titledItems.slice(0, 2).map((item) => item.title.trim()),
+    };
+  });
+
   const client = new OpenAI();
 
   try {
@@ -1118,7 +1140,7 @@ async function filterByAudienceRelevance(
       model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
       messages: [
         { role: "system", content: AUDIENCE_RELEVANCE_PROMPT },
-        { role: "user", content: JSON.stringify(keywordTexts) },
+        { role: "user", content: JSON.stringify(keywordContexts) },
       ],
       temperature: 0,
     });
@@ -1129,11 +1151,11 @@ async function filterByAudienceRelevance(
 
     const scores: Record<string, number> = JSON.parse(jsonMatch[0]);
 
-    const RELEVANCE_THRESHOLD = 3;
+    const RELEVANCE_THRESHOLD = 5;
     return keywords.filter((kw) => {
       const score = scores[kw.keyword];
       if (score == null) return true; // LLM이 누락한 키워드는 유지
-      if (score <= RELEVANCE_THRESHOLD) {
+      if (score < RELEVANCE_THRESHOLD) {
         console.log(`[keywords] DROP(low_relevance=${score}): "${kw.keyword}"`);
         return false;
       }
@@ -1480,7 +1502,7 @@ export async function normalizeKeywords(
   }
 
   // Audience relevance: 바이브코더/생성형AI 타겟 적합도 필터링
-  const relevanceFiltered = await filterByAudienceRelevance(result);
+  const relevanceFiltered = await filterByAudienceRelevance(result, items);
   console.log(
     `[keywords] After audience_relevance: ${result.length} → ${relevanceFiltered.length} keywords`
   );
