@@ -42,6 +42,8 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   // Anthropic 공식 RSS는 2026 들어 제거됨. 직접적 대체 없음.
   // (안ROPIC 발표는 simonwillison.net 등 큐레이션 피드를 통해 우회 수집)
   { url: "https://huggingface.co/blog/feed.xml", title: "HuggingFace Blog", tier: "P0_CURATED", lang: "en" },
+  // Google 공식 AI 제품/정책/리서치 발표 채널. PR 성격이 있어 P1에서 맥락 신호로 사용한다.
+  { url: "https://blog.google/technology/ai/rss/", title: "Google AI (The Keyword)", tier: "P1_CONTEXT", lang: "en" },
   { url: "https://bullrich.dev/tldr-rss/ai.rss", title: "TLDR AI", tier: "P0_CURATED", lang: "en" },
   // 리서치 페이퍼 (일간 AI 논문)
   { url: "https://papers.takara.ai/api/feed", title: "HF Daily Papers (Takara)", tier: "P0_CURATED", lang: "en" },

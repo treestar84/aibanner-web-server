@@ -19,7 +19,6 @@ const CHANGELOG_SOURCES: ChangelogConfig[] = [
   { url: "https://openai.com/news/rss.xml", title: "OpenAI News", tier: "P0_CURATED", lang: "en" },
   // openrouter.ai/announcements/rss는 200을 주지만 본문이 SPA HTML이라 rss-parser가 실패 — 제외.
   { url: "https://www.warp.dev/blog/rss.xml", title: "Warp Blog", tier: "P1_CONTEXT", lang: "en" },
-  { url: "https://blog.google/technology/ai/rss/", title: "Google AI Blog", tier: "P1_CONTEXT", lang: "en" },
 ];
 
 async function fetchRssChangelog(
