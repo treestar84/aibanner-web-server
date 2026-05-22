@@ -482,7 +482,9 @@ export function scoreSourcePriority(source: TavilySource, keyword: string): numb
   let priorityScore = relevanceScore;
 
   if (isKoreanPreferredSource(source)) {
-    priorityScore += 1.2;
+    // 소셜 버킷에서는 한국 가중치를 낮춰 X/Reddit 등 글로벌 소셜이 들어올 공간 확보
+    const isSocial = classifySourceCategory(source) === "social";
+    priorityScore += isSocial ? 0.6 : 1.2;
   }
   if (source.provider === "naver") {
     priorityScore += 0.2;
