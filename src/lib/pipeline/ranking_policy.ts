@@ -374,12 +374,14 @@ export function calculateKeywordPolicyDelta(
 
   if (isWeakVersionOnly) delta -= 0.04;
 
+  // 단일 소스 + engagement 없음 + 낮은 authority + 매칭 기사 1개 → generic 단발 기사 패턴
   const isLowSignalSingleSource =
     item.keyword.candidates.domains.size === 1 &&
     item.score.engagement === 0 &&
-    item.score.authority <= 0.3;
+    item.score.authority <= 0.3 &&
+    item.keyword.candidates.count <= 1;
 
-  if (isLowSignalSingleSource) delta -= 0.08;
+  if (isLowSignalSingleSource) delta -= 0.14;
 
   return parseFloat(delta.toFixed(4));
 }
@@ -486,7 +488,7 @@ export function calculateStabilityDelta(
   } else if (appearances >= 12) {
     // 3일 이상 등장 (cron 4x/day 기준): velocity 낮으면 상시 검색어(evergreen) 판정 → 패널티
     if (item.score.velocity < 0.35) {
-      delta -= 0.04;
+      delta -= 0.08;
     } else {
       // velocity 높으면 여전히 실제 이슈 → 약한 유지
       delta += 0.005;

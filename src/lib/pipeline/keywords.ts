@@ -378,12 +378,17 @@ Extract concise, search-friendly trending keywords. Each keyword should be somet
 ## SKIP — DO NOT EXTRACT
 - Article headlines or clickbait (anything reading like a sentence)
 - Generic AI: "AI 기반 X", "AI 모델 X", "AI 투자 X", "AI 학습용 X"
+- Generic category descriptors with no specific subject: "AI-powered assistant", "AI agent skills", "AI document assistant", "knowledge platform", "MCP server" (when no specific new version/spec)
 - Generic abbreviations alone: "AI", "ML", "DL", "LLM", "NLP"
 - Policy, regulation, tax, GDP, market analysis
 - Non-AI topics: hardware manufacturing, automotive, CCTV, construction
 - Company name alone without product/event ("OpenAI", "Google", "Anthropic")
 - News media outlet names ("TechCrunch", "The Verge", "Wired", "VentureBeat", "Ars Technica")
 - More than 4 words = too long
+
+## SELF-CHECK before adding each keyword
+Ask: "Could a developer have searched this exact phrase 6 months ago and gotten equally relevant results?"
+If YES → SKIP (it is evergreen/perennial, not trending). Only keep keywords that are clearly anchored to something NEW happening right now.
 
 ## DUPLICATES
 Same topic different phrasing → extract ONE keyword only.
@@ -1095,25 +1100,44 @@ async function semanticMergeKeywords(
 // ─── Audience Relevance Filter ──────────────────────────────────────────────
 // 바이브코더/생성형AI 개발자 타겟 적합도를 LLM으로 판정, 낮은 점수 키워드 제거
 
-const AUDIENCE_RELEVANCE_PROMPT = `Score each keyword for vibe coders — developers who use Claude Code, Cursor, Copilot, Codex CLI, Windsurf daily.
+const AUDIENCE_RELEVANCE_PROMPT = `Score each keyword on TWO separate axes for vibe coders — developers who use Claude Code, Cursor, Copilot, Codex CLI, Windsurf daily.
 
-Answer TWO things per keyword: (1) is it relevant to vibe coders? (2) is it BREAKING/NEW today, or just always-relevant?
+## Axis 1: RELEVANCE (1-10)
+How directly useful/interesting is this topic to a vibe coder?
+- 9-10: Core daily tools (Claude Code, Cursor, Copilot, MCP, AI coding APIs)
+- 7-8:  AI developer tools, model releases, dev infrastructure
+- 4-6:  General AI news that affects developers indirectly
+- 1-3:  Policy, regulation, healthcare, business deals, non-developer topics
 
-Score 1-10 combining BOTH dimensions:
-- 9-10: Specific NEW release/tool/API vibe coders will immediately try or read about
-         e.g. "Google Antigravity 2.0", "Qwen3.7-Max", "Gemini CLI", "Codex CLI 출시", "Composer 2.5"
-- 7-8:  Important AI tool/model update, clearly developer-facing
-         e.g. "GPT-5 API", "Claude 4 Sonnet", "MCP server" (when new spec drops)
-- 5-6:  General AI developer news worth knowing, or perennial tools with TODAY's specific news
-         e.g. "DeepSeek R2", "Claude API" (only if major new feature announced today)
-- 3-4:  Always-relevant but NOT specifically trending today (perennial/evergreen)
-         e.g. "Claude API" (routine mentions), "MCP" (no new spec), "GitHub Copilot" (no update)
-- 1-2:  Not relevant: policy, regulation, healthcare, business deals, non-developer topics
+## Axis 2: NOVELTY (1-10)
+Is this keyword anchored to something NEW happening RIGHT NOW, or is it always-relevant?
+- 9-10: Clear new event: specific version number, launch announcement, named release (e.g. "Composer 2.5", "Gemini CLI launch")
+- 7-8:  Significant update with clear evidence in titles (new feature, breaking change, new spec)
+- 4-6:  Some new angle, but the keyword itself is a known category
+- 1-3:  Perennial/evergreen — could have been searched 6 months ago with equally relevant results
 
-Input: JSON array of objects. Each object has "keyword" (string) and "titles" (array of 1-2 sample article titles mentioning that keyword).
-Use the titles to judge whether the keyword is NEW/BREAKING today or just perennial.
-Output: JSON object mapping keyword → score (number 1-10). Include ALL keywords.
-Example: {"Google Antigravity 2.0": 9, "Claude API": 4, "AI 반도체 수출규제": 1, "Qwen3.7-Max": 9}`;
+NOVELTY=LOW examples (score 1-3) — these are ALWAYS-PRESENT, not trending:
+- Bare tool/API names with no version or event: "Claude API", "MCP server", "GitHub Copilot"
+- Generic category phrases: "AI-powered assistant", "AI agent skills", "knowledge platform", "AI document assistant"
+- Anything composed only of: AI + adjective + category noun
+
+NOVELTY=HIGH requires at least ONE of:
+- Explicit version number (Composer 2.5, Qwen3.7-Max, GPT-5)
+- Named launch/release event (Gemini CLI launch, Codex CLI 출시)
+- Specific named initiative or product (Google Antigravity 2.0, AgentCo-op)
+
+Input: JSON array of objects. Each has "keyword" (string) and "titles" (array of 1-2 article titles).
+Use titles to judge novelty — look for version numbers, launch verbs (launches, releases, announces, introduces), or named events.
+
+Output: JSON object mapping keyword → {"relevance": number, "novelty": number}. Include ALL keywords.
+Example: {
+  "Google Antigravity 2.0": {"relevance": 9, "novelty": 10},
+  "Claude API": {"relevance": 9, "novelty": 2},
+  "AI-powered assistant": {"relevance": 5, "novelty": 1},
+  "MCP server": {"relevance": 8, "novelty": 2},
+  "Qwen3.7-Max": {"relevance": 9, "novelty": 9},
+  "AI 반도체 수출규제": {"relevance": 2, "novelty": 5}
+}`;
 
 async function filterByAudienceRelevance(
   keywords: NormalizedKeyword[],
@@ -1149,14 +1173,25 @@ async function filterByAudienceRelevance(
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return keywords;
 
-    const scores: Record<string, number> = JSON.parse(jsonMatch[0]);
+    const scores: Record<string, { relevance?: number; novelty?: number } | number> = JSON.parse(jsonMatch[0]);
 
-    const RELEVANCE_THRESHOLD = 5;
+    const RELEVANCE_MIN = 7;
+    const NOVELTY_MIN = 6;
     return keywords.filter((kw) => {
-      const score = scores[kw.keyword];
-      if (score == null) return true; // LLM이 누락한 키워드는 유지
-      if (score < RELEVANCE_THRESHOLD) {
-        console.log(`[keywords] DROP(low_relevance=${score}): "${kw.keyword}"`);
+      const entry = scores[kw.keyword];
+      if (entry == null) return true; // LLM이 누락한 키워드는 유지
+      // 구형 단일 숫자 응답 호환
+      if (typeof entry === "number") {
+        if (entry < 5) {
+          console.log(`[keywords] DROP(low_relevance=${entry}): "${kw.keyword}"`);
+          return false;
+        }
+        return true;
+      }
+      const relevance = entry.relevance ?? 10;
+      const novelty = entry.novelty ?? 10;
+      if (relevance < RELEVANCE_MIN || novelty < NOVELTY_MIN) {
+        console.log(`[keywords] DROP(relevance=${relevance},novelty=${novelty}): "${kw.keyword}"`);
         return false;
       }
       return true;

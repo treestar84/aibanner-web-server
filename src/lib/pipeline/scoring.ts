@@ -101,7 +101,12 @@ function calculateVelocityScore(
   const baselinePerRecentWindow = baselineCount / (baselineWindow / recentWindow);
   const ratio = (recentCount + 1) / (baselinePerRecentWindow + 1);
   const centered = (ratio - 1) / (ratio + 1); // -1..1
-  return Math.max(0, Math.min(1, centered));
+  const raw = Math.max(0, Math.min(1, centered));
+
+  // 단일 도메인 소스만 있는 경우 velocity를 감쇠: domains=1 → ×0.75, domains≥2 → ×1.0
+  const domainDiversity = keyword.candidates.domains.size;
+  const diversityMultiplier = domainDiversity <= 1 ? 0.75 : 1.0;
+  return parseFloat((raw * diversityMultiplier).toFixed(4));
 }
 
 // ─── Engagement scoring ───────────────────────────────────────────────────────
