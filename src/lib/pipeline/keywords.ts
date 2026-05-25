@@ -72,6 +72,12 @@ const GENERIC_WORDS = new Set([
   "글로벌", "기술", "공격",
   // "AI 기반 X" 보완 단어: AI_GENERIC_PREFIX_RE로 이관 → 비AI 접두어 복합구는 필터 제외
   // 예: "AI 오케스트레이션" → 필터됨, "LangChain 오케스트레이션" → 통과
+  // English generic nouns missing from above (cause AI-powered X phrases to slip through)
+  "knowledge", "document", "documents", "healthcare", "efficiency",
+  "voice", "assistant", "assistants", "orchestration", "article", "articles",
+  "processing", "workflow", "workflows", "automation", "productivity",
+  "management", "monitoring", "optimization", "generation", "solutions",
+  "multi", "native", "driven", "powered", "based", "enabled",
 ]);
 
 // 전치사/관사: 의미 없는 1-2자 기능어 (ai, ml 같은 기술 약어는 별도 GENERIC_WORDS로 처리)
@@ -107,7 +113,7 @@ function isGenericAiAgentPhrase(keyword: string): boolean {
 }
 
 // ─── "AI 기반/모델/투자/학습용 X" generic prefix filter ─────────────────────
-const AI_GENERIC_PREFIX_RE = /^ai[\s-](?:기반|모델|투자|학습용|활용|powered|based|driven|enabled|어시스턴트|오케스트레이션|문서|다중|기사|처리|헬스케어|효율성|지식)\s*/i;
+const AI_GENERIC_PREFIX_RE = /^ai[\s-](?:기반|모델|투자|학습용|활용|powered|based|driven|enabled|어시스턴트|오케스트레이션|문서|다중|기사|처리|헬스케어|효율성|지식|document|healthcare|voice|orchestration|article|workflow|productivity|efficiency|automation|management|monitoring|optimization)\s*/i;
 
 function isGenericAiPrefixPhrase(keyword: string): boolean {
   if (!AI_GENERIC_PREFIX_RE.test(keyword)) return false;
