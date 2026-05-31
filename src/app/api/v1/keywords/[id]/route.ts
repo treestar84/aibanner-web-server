@@ -6,6 +6,7 @@ import {
   getKeywordById,
   getKeywordInLatestSnapshot,
   getSourcesByKeyword,
+  getKeywordSparkline,
 } from "@/lib/db/queries";
 import { isManualKeywordId } from "@/lib/manual-keywords";
 import { classifySourceCategory } from "@/lib/pipeline/source_category";
@@ -116,6 +117,7 @@ export async function GET(
     // Phase 3 §5.2.6 (PRD 2026-04-23): SNS·검색 deeplink 4종.
     // localizedKeyword(현재 lang에 맞춘 표기) 기준으로 검색 URL을 만든다.
     const deeplinks = buildSnsDeeplinks(localizedKeyword);
+    const sparkline = await getKeywordSparkline(id);
 
     return NextResponse.json(
       {
@@ -129,6 +131,9 @@ export async function GET(
         bullets,
         sources: grouped,
         deeplinks,
+        rank: keyword.rank,
+        deltaRank: keyword.delta_rank,
+        sparkline,
       },
       {
         headers: {
