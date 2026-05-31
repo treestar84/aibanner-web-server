@@ -1281,6 +1281,20 @@ export async function deleteDailyKeywordStatsOlderThan(
   return rows.length;
 }
 
+export async function getKeywordSparkline(
+  keywordId: string,
+  days = 7
+): Promise<number[]> {
+  const rows = (await sql`
+    SELECT appearance_count
+    FROM keyword_daily_stats
+    WHERE keyword_id = ${keywordId}
+    ORDER BY stat_date DESC
+    LIMIT ${days}
+  `) as { appearance_count: number }[];
+  return rows.map((r) => r.appearance_count).reverse();
+}
+
 export async function deleteSourcesOlderThan(
   detailedDays: number
 ): Promise<number> {
