@@ -2,6 +2,7 @@ import type { RssItem } from "./rss";
 import OpenAI from "openai";
 import { isExcludedKeyword } from "./keyword_exclusions";
 import type { PipelineMode } from "./mode";
+import { filterByAudienceRelevance } from "./audience_relevance";
 
 // ─── Generic term filter (hard filter — safety net after LLM extraction) ─────
 
@@ -1100,111 +1101,6 @@ async function semanticMergeKeywords(
   } catch (err) {
     console.warn("[keywords] Semantic merge LLM call failed, skipping:", (err as Error).message);
     return { keywords, candidateMap };
-  }
-}
-
-// ─── Audience Relevance Filter ──────────────────────────────────────────────
-// 바이브코더/생성형AI 개발자 타겟 적합도를 LLM으로 판정, 낮은 점수 키워드 제거
-
-const AUDIENCE_RELEVANCE_PROMPT = `Score each keyword on TWO separate axes for vibe coders — developers who use Claude Code, Cursor, Copilot, Codex CLI, Windsurf daily.
-
-## Axis 1: RELEVANCE (1-10)
-How directly useful/interesting is this topic to a vibe coder?
-- 9-10: Core daily tools (Claude Code, Cursor, Copilot, MCP, AI coding APIs)
-- 7-8:  AI developer tools, model releases, dev infrastructure
-- 4-6:  General AI news that affects developers indirectly
-- 1-3:  Policy, regulation, healthcare, business deals, non-developer topics
-
-## Axis 2: NOVELTY (1-10)
-Is this keyword anchored to something NEW happening RIGHT NOW, or is it always-relevant?
-- 9-10: Clear new event: specific version number, launch announcement, named release (e.g. "Composer 2.5", "Gemini CLI launch")
-- 7-8:  Significant update with clear evidence in titles (new feature, breaking change, new spec)
-- 4-6:  Some new angle, but the keyword itself is a known category
-- 1-3:  Perennial/evergreen — could have been searched 6 months ago with equally relevant results
-
-NOVELTY=LOW examples (score 1-3) — these are ALWAYS-PRESENT, not trending:
-- Bare tool/API names with no version or event: "Claude API", "MCP server", "GitHub Copilot"
-- Generic category phrases: "AI-powered assistant", "AI agent skills", "knowledge platform", "AI document assistant"
-- Anything composed only of: AI + adjective + category noun
-
-NOVELTY=HIGH requires at least ONE of:
-- Explicit version number (Composer 2.5, Qwen3.7-Max, GPT-5)
-- Named launch/release event (Gemini CLI launch, Codex CLI 출시)
-- Specific named initiative or product (Google Antigravity 2.0, AgentCo-op)
-
-Input: JSON array of objects. Each has "keyword" (string) and "titles" (array of 1-2 article titles).
-Use titles to judge novelty — look for version numbers, launch verbs (launches, releases, announces, introduces), or named events.
-
-Output: JSON object mapping keyword → {"relevance": number, "novelty": number}. Include ALL keywords.
-Example: {
-  "Google Antigravity 2.0": {"relevance": 9, "novelty": 10},
-  "Claude API": {"relevance": 9, "novelty": 2},
-  "AI-powered assistant": {"relevance": 5, "novelty": 1},
-  "MCP server": {"relevance": 8, "novelty": 2},
-  "Qwen3.7-Max": {"relevance": 9, "novelty": 9},
-  "AI 반도체 수출규제": {"relevance": 2, "novelty": 5}
-}`;
-
-async function filterByAudienceRelevance(
-  keywords: NormalizedKeyword[],
-  items: RssItem[]
-): Promise<NormalizedKeyword[]> {
-  if (keywords.length <= 5) return keywords;
-
-  // 키워드별 대표 제목 1-2개를 포함해 LLM이 "오늘 새로운 소식인지" 판단할 수 있도록 컨텍스트 제공
-  const keywordContexts = keywords.map((kw) => {
-    const titledItems = [...kw.candidates.matchedItems]
-      .map((idx) => items[idx])
-      .filter(Boolean)
-      .sort((a, b) => (TIER_ORDER[a.tier] ?? 9) - (TIER_ORDER[b.tier] ?? 9));
-    return {
-      keyword: kw.keyword,
-      titles: titledItems.slice(0, 2).map((item) => item.title.trim()),
-    };
-  });
-
-  const client = new OpenAI();
-
-  try {
-    const response = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-      messages: [
-        { role: "system", content: AUDIENCE_RELEVANCE_PROMPT },
-        { role: "user", content: JSON.stringify(keywordContexts) },
-      ],
-      temperature: 0,
-    });
-
-    const content = response.choices[0]?.message?.content ?? "{}";
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return keywords;
-
-    const scores: Record<string, { relevance?: number; novelty?: number } | number> = JSON.parse(jsonMatch[0]);
-
-    const RELEVANCE_MIN = 7;
-    const NOVELTY_MIN = 6;
-    return keywords.filter((kw) => {
-      const entry = scores[kw.keyword];
-      if (entry == null) return true; // LLM이 누락한 키워드는 유지
-      // 구형 단일 숫자 응답 호환
-      if (typeof entry === "number") {
-        if (entry < 5) {
-          console.log(`[keywords] DROP(low_relevance=${entry}): "${kw.keyword}"`);
-          return false;
-        }
-        return true;
-      }
-      const relevance = entry.relevance ?? 10;
-      const novelty = entry.novelty ?? 10;
-      if (relevance < RELEVANCE_MIN || novelty < NOVELTY_MIN) {
-        console.log(`[keywords] DROP(relevance=${relevance},novelty=${novelty}): "${kw.keyword}"`);
-        return false;
-      }
-      return true;
-    });
-  } catch (err) {
-    console.warn("[keywords] Audience relevance check failed, skipping:", (err as Error).message);
-    return keywords;
   }
 }
 
