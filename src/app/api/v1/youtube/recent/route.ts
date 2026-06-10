@@ -89,7 +89,8 @@ export async function GET(req: NextRequest) {
       },
       {
         headers: {
-          "Cache-Control": "no-store",
+          // 스냅샷 주기(하루 4회)로만 바뀌는 데이터 — trends와 동일하게 CDN 캐시 허용
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=15",
         },
       }
     );
