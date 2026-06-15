@@ -10,6 +10,10 @@ import { collectProductHuntTopItems } from "./product_hunt_top_source";
 import { collectRedditItems } from "./reddit_source";
 import { collectTechmemeItems } from "./techmeme_source";
 import { collectGoogleAlertsItems } from "./google_alerts_source";
+import { collectOpenRouterItems } from "./openrouter_source";
+import { collectHuggingFaceItems } from "./huggingface_source";
+import { collectVendorAnnouncementItems } from "./vendor_announcements_source";
+import { collectBlueskyItems } from "./bluesky_source";
 import type { RssItem } from "./rss";
 import { normalizeKeywords } from "./keywords";
 import { rankKeywords } from "./scoring";
@@ -37,6 +41,11 @@ import {
   buildRankingCandidateDebug,
   calculateFixedCandidateBonus,
 } from "./ranking_candidate_debug";
+import {
+  evaluateRankingQualityCandidate,
+  parseRankingQualityFlags,
+} from "./ranking_quality_policy";
+import { buildRankingQualityCandidate } from "./snapshot_quality_adapter";
 import { normalizeManualKeywordLookupKey } from "@/lib/manual-keywords";
 import {
   insertSnapshot,
@@ -154,6 +163,10 @@ const SOURCE_PLANS: SourcePlan[] = [
   { key: "techmeme", collect: (windowHours) => collectTechmemeItems(windowHours) },
   { key: "google_alerts", collect: (windowHours) => collectGoogleAlertsItems(windowHours) },
   { key: "reddit", collect: (windowHours) => collectRedditItems(windowHours) },
+  { key: "openrouter", collect: (windowHours) => collectOpenRouterItems(windowHours) },
+  { key: "huggingface", collect: (windowHours) => collectHuggingFaceItems(windowHours) },
+  { key: "vendor_announcements", collect: (windowHours) => collectVendorAnnouncementItems(windowHours) },
+  { key: "bluesky", collect: (windowHours) => collectBlueskyItems(windowHours) },
 ];
 
 function resolveSourceWindowProfile(): SourceWindowProfile {
@@ -548,7 +561,7 @@ async function processKeyword(
     );
     const localizedSources = await ensureLocalizedStoredSources(cached.sources);
     const primaryType = determinePrimaryType(localizedSources);
-    const topSource = pickPrimarySource(localizedSources, primaryType);
+    const topSource = pickPrimarySource(localizedSources, primaryType, kw.keyword);
 
     console.log(`[snapshot] [REUSE] ${kw.keyword} (rank ${item.rank})`);
     await insertKeyword({
@@ -688,7 +701,7 @@ async function processKeyword(
   );
   const localizedKeyword = await ensureLocalizedKeyword(kw.keyword);
   const primaryType = determinePrimaryType(allSources);
-  const topSource = pickPrimarySource(allSources, primaryType);
+  const topSource = pickPrimarySource(allSources, primaryType, kw.keyword);
 
   // 소스 제목 번역 (배치)
   const sourceEntries = Object.entries(sourcesMap).flatMap(([type, typeItems]) =>
@@ -782,9 +795,14 @@ export async function runSnapshotPipeline(
     `[snapshot] Config: mode=${mode}, detailedLimit=${profile.detailedKeywordLimit}, keywordConcurrency=${KEYWORD_CONCURRENCY}, lightweightConcurrency=${LIGHTWEIGHT_CONCURRENCY}, scheduleUtc=${profile.scheduleUtc.map((slot) => `${String(slot.hour).padStart(2, "0")}:${String(slot.minute).padStart(2, "0")}`).join(",")}, recencyHalfLifeHours=${profile.scoring.recencyHalfLifeHours}, velocityWindow=${profile.scoring.velocityRecentWindowHours}h+${profile.scoring.velocityBaselineWindowHours}h, enrichmentForNew=${profile.allowExternalEnrichmentForNewKeywords}`
   );
 
-  // 최근 4개 스냅샷 조회 (캐시 범위 48h)
+  // 캐시 재사용 범위: 최근 4개 스냅샷 (약 24h)
+  // 히스토리 범위: 최근 16개 스냅샷 (cron 4x/day × 4일) — appearances >= 8·12 패널티 도달 가능
   const CACHE_SNAPSHOTS = 4;
-  const recentSnapshots = await getRecentSnapshots(CACHE_SNAPSHOTS, mode);
+  const HISTORY_SNAPSHOTS = 16;
+  const [recentSnapshots, historySnapshots] = await Promise.all([
+    getRecentSnapshots(CACHE_SNAPSHOTS, mode),
+    getRecentSnapshots(HISTORY_SNAPSHOTS, mode),
+  ]);
   const prevSnapshot = recentSnapshots[0] ?? null; // delta rank 계산용
   const recentSnapshotIds = recentSnapshots.map((s) => s.snapshot_id);
 
@@ -794,6 +812,9 @@ export async function runSnapshotPipeline(
   const sourceStateMap = new Map<string, SourceIngestionState>(
     sourceStates.map((state) => [state.source_key, state])
   );
+  // 주의: 구조 분해 순서는 SOURCE_PLANS 배열 순서와 정확히 일치해야 한다.
+  // (과거 techmeme/google_alerts 추가 시 구조 분해 누락으로 reddit 결과가
+  //  유실되던 버그가 있었음 — 항목 추가 시 반드시 양쪽을 함께 수정할 것)
   const [
     productHuntTopItems,
     rssItems,
@@ -804,7 +825,13 @@ export async function runSnapshotPipeline(
     youtubeItems,
     githubReleaseItems,
     changelogItems,
+    techmemeItems,
+    googleAlertsItems,
     redditItems,
+    openRouterItems,
+    huggingFaceItems,
+    vendorAnnouncementItems,
+    blueskyItems,
   ] = await Promise.all(
     SOURCE_PLANS.map((plan) =>
       collectWithIncrementalWindow(profile, plan, sourceStateMap)
@@ -816,21 +843,27 @@ export async function runSnapshotPipeline(
   const allItems = [
     ...productHuntTopItems,
     ...rssItems,
+    ...vendorAnnouncementItems,
     ...githubMdItems,
     ...githubReleaseItems,
     ...changelogItems,
+    ...openRouterItems,
+    ...huggingFaceItems,
     ...youtubeItems,
+    ...techmemeItems,
+    ...googleAlertsItems,
     ...hnItems,
     ...gdeltItems,
     ...githubItems,
     ...redditItems,
+    ...blueskyItems,
   ].filter((item) => {
     if (seenUrls.has(item.link)) return false;
     seenUrls.add(item.link);
     return true;
   });
   console.log(
-    `[snapshot] Got ${allItems.length} items (productHuntTop=${productHuntTopItems.length}, rss=${rssItems.length}, githubMd=${githubMdItems.length}, githubRel=${githubReleaseItems.length}, changelog=${changelogItems.length}, youtube=${youtubeItems.length}, hn=${hnItems.length}, gdelt=${gdeltItems.length}, github=${githubItems.length}, reddit=${redditItems.length})`
+    `[snapshot] Got ${allItems.length} items (productHuntTop=${productHuntTopItems.length}, rss=${rssItems.length}, vendorAnnounce=${vendorAnnouncementItems.length}, githubMd=${githubMdItems.length}, githubRel=${githubReleaseItems.length}, changelog=${changelogItems.length}, openrouter=${openRouterItems.length}, huggingface=${huggingFaceItems.length}, youtube=${youtubeItems.length}, techmeme=${techmemeItems.length}, googleAlerts=${googleAlertsItems.length}, hn=${hnItems.length}, gdelt=${gdeltItems.length}, github=${githubItems.length}, reddit=${redditItems.length}, bluesky=${blueskyItems.length})`
   );
 
   // 2~3) 키워드 추출 + 정규화 (AI 클러스터링)
@@ -893,7 +926,7 @@ export async function runSnapshotPipeline(
   });
 
   const recentTopKeywordLists = await Promise.all(
-    recentSnapshots.map((snapshot) => getTopKeywords(snapshot.snapshot_id, 10))
+    historySnapshots.map((snapshot) => getTopKeywords(snapshot.snapshot_id, 10))
   );
   const historyByKeywordId = new Map<string, RankingHistoryStats>();
   for (const item of rankedWithHistory) {
@@ -927,9 +960,32 @@ export async function runSnapshotPipeline(
     })
     .sort((a, b) => b.score.total - a.score.total);
 
+  const qualityFlags = parseRankingQualityFlags();
+  const qualityDeltaByKeywordId = new Map<string, number>();
+  const qualityReasonsByKeywordId = new Map<string, readonly string[]>();
+  const rankedWithQuality = rankedWithStability
+    .map((item) => {
+      const isManual = keywordLookupKeys(item).some((key) =>
+        activeManualKeywordKeySet.has(key)
+      );
+      const decision = evaluateRankingQualityCandidate(
+        buildRankingQualityCandidate(
+          item,
+          allItems,
+          historyByKeywordId.get(item.keyword.keywordId),
+          isManual
+        ),
+        qualityFlags
+      );
+      qualityDeltaByKeywordId.set(item.keyword.keywordId, decision.appliedDelta);
+      qualityReasonsByKeywordId.set(item.keyword.keywordId, decision.reasons);
+      return applyInternalDelta(item, decision.appliedDelta);
+    })
+    .sort((a, b) => b.score.total - a.score.total);
+
   const manualPriority = applyManualKeywordPriority(
     mode,
-    rankedWithStability,
+    rankedWithQuality,
     activeManualKeywords,
     {
       internalBonus: MANUAL_KEYWORD_INTERNAL_BONUS,
@@ -981,6 +1037,7 @@ export async function runSnapshotPipeline(
         is_manual: keywordLookupKeys(item).some((key) => manualKeywordKeySet.has(key)),
         ...buildRankingCandidateDebug({
           policyDelta: policyDeltaByKeywordId.get(item.keyword.keywordId) ?? 0,
+          qualityReasons: qualityReasonsByKeywordId.get(item.keyword.keywordId) ?? [],
           stabilityDelta: stabilityDeltaByKeywordId.get(item.keyword.keywordId) ?? 0,
           manualDelta: manualPriority.manualDeltaByKeywordId.get(item.keyword.keywordId) ?? 0,
           isInsertedManual: manualPriority.insertedKeywordIds.has(item.keyword.keywordId),
