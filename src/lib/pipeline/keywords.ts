@@ -79,6 +79,12 @@ const GENERIC_WORDS = new Set([
   "processing", "workflow", "workflows", "automation", "productivity",
   "management", "monitoring", "optimization", "generation", "solutions",
   "multi", "native", "driven", "powered", "based", "enabled",
+  // 추상 개념어 방지: 아래 단어들이 복합구 전체를 구성하면 generic으로 분류
+  // "AI 에이전트 CLI 도구", "에이전틱 하네스", "루프 엔지니어링", "AI 컨텍스트 레이어" 등을 잡아냄
+  // 단독으로는 필터되지 않으며, 다른 generic 단어와 함께 구성된 경우에만 작동
+  "하네스", "런타임", "레이어", "도구", "가이드",
+  "에이전틱", "컨텍스트", "루프", "구현", "cli",
+  "코딩", "효율성", "rag",
 ]);
 
 // 전치사/관사: 의미 없는 1-2자 기능어 (ai, ml 같은 기술 약어는 별도 GENERIC_WORDS로 처리)
@@ -379,13 +385,15 @@ Extract concise, search-friendly trending keywords. Each keyword should be somet
 - New product/tool launches (Electrobun, ProducerAI, OpenClaw Stella)
 - API or model releases (gpt-realtime-1.5 API, Gemini 2.5 Pro)
 - Named initiatives (OpenAI Frontier Alliance, Google Cloud AI)
-- Developer tool integrations (Cursor like 익스텐션, Codex 하네스 활용)
+- Developer tool integrations and new features (Cursor AI 검색, Windsurf Cascade)
 - Infrastructure changes relevant to developers (Hetzner 가격 인상)
 
 ## SKIP — DO NOT EXTRACT
 - Article headlines or clickbait (anything reading like a sentence)
 - Generic AI: "AI 기반 X", "AI 모델 X", "AI 투자 X", "AI 학습용 X"
 - Generic category descriptors with no specific subject: "AI-powered assistant", "AI agent skills", "AI document assistant", "knowledge platform", "MCP server" (when no specific new version/spec)
+- Generic method/howto descriptions: "하네스 활용" (how to use X), "RAG 구현" (implement RAG), "AI 에이전트 CLI 도구" (category description), "루프 엔지니어링" (abstract technique)
+- GitHub repo slug names in kebab-case: "mcp-gateway-registry", "laravel-fastapi-demo", "claude-code-session-bridge"
 - Generic abbreviations alone: "AI", "ML", "DL", "LLM", "NLP"
 - Policy, regulation, tax, GDP, market analysis
 - Non-AI topics: hardware manufacturing, automotive, CCTV, construction

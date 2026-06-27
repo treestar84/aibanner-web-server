@@ -53,11 +53,58 @@ test("isExactlyExcludedKeyword (legacy alias)는 isExcludedKeyword와 동일 동
   );
 });
 
-// ─── prefix / regex 스키마 검증 ─────────────────────────────────────────────
-// 현재 prefix/regex 배열은 비어 있으나, 스키마가 살아있고 invalid regex가 안전하게 무시되는지 검증.
+// ─── prefix 규칙 ────────────────────────────────────────────────────────────
 
-test("isExcludedKeyword: prefix/regex 배열이 비어있는 현 상태에서는 exact 외 모든 키워드 통과", () => {
-  // 어떤 키워드든 exact에 없다면 false 여야 함 (prefix/regex 활성 전).
+test("isExcludedKeyword: Show HN: 접두사 키워드는 차단된다", () => {
+  assert.equal(isExcludedKeyword("Show HN: slash-agent"), true);
+  assert.equal(isExcludedKeyword("Show HN: My New Tool"), true);
+  assert.equal(isExcludedKeyword("show hn: Modeloop"), true);
+  assert.equal(isExcludedKeyword("Modeloop"), false, "Show HN 없이는 통과");
+});
+
+// ─── regex 규칙 ─────────────────────────────────────────────────────────────
+
+test("isExcludedKeyword: owner/repo + 버전 패턴은 차단된다", () => {
+  assert.equal(isExcludedKeyword("vercel/ai ai@6.0.209"), true);
+  assert.equal(isExcludedKeyword("ggml-org/llama.cpp b9775"), true);
+  assert.equal(isExcludedKeyword("anthropics/claude-code v2.1.186"), true);
+  assert.equal(isExcludedKeyword("BerriAI/litellm v1.89.4"), true);
+});
+
+test("isExcludedKeyword: pip ==version 패턴은 차단된다", () => {
+  assert.equal(isExcludedKeyword("langchain==1.3.10"), true);
+  assert.equal(isExcludedKeyword("langchain-openrouter==0.2.4"), true);
+});
+
+test("isExcludedKeyword: Claude Code 3자리 이상 패치 버전은 차단된다", () => {
+  assert.equal(isExcludedKeyword("Claude Code v2.1.185"), true);
+  assert.equal(isExcludedKeyword("Anthropic Claude v2.1.193"), true);
+  assert.equal(isExcludedKeyword("Claude Code v2.1.0"), false, "한 자리 패치는 허용");
+  assert.equal(isExcludedKeyword("Claude Code v3.0.0"), false, "패치 0인 주요 버전은 허용");
+});
+
+test("isExcludedKeyword: 3분절 이상 kebab-case 개인 레포명은 차단된다", () => {
+  assert.equal(isExcludedKeyword("mcp-gateway-registry"), true);
+  assert.equal(isExcludedKeyword("claude-code-session-bridge"), true);
+  assert.equal(isExcludedKeyword("laravel-fastapi-demo"), true);
+  assert.equal(isExcludedKeyword("claude-code"), false, "2분절은 허용");
+  assert.equal(isExcludedKeyword("langchain-openrouter"), false, "2분절은 허용");
+});
+
+// ─── Category 5 추상 개념어 exact 차단 ───────────────────────────────────────
+
+test("isExcludedKeyword: Category 5 추상 개념어는 차단된다", () => {
+  assert.equal(isExcludedKeyword("AI 에이전트 CLI 도구"), true);
+  assert.equal(isExcludedKeyword("에이전트 하네스"), true);
+  assert.equal(isExcludedKeyword("RAG 구현"), true);
+  assert.equal(isExcludedKeyword("루프 엔지니어링"), true);
+  assert.equal(isExcludedKeyword("Codex 하네스 활용"), true);
+  assert.equal(isExcludedKeyword("AI 컨텍스트 레이어"), true);
+});
+
+// ─── prefix/regex 비간섭 검증 (기존 호환) ───────────────────────────────────
+
+test("isExcludedKeyword: prefix/regex가 무관한 키워드는 통과한다", () => {
   assert.equal(isExcludedKeyword("ai agent framework"), false);
   assert.equal(isExcludedKeyword("chatgpt 5.0 release"), false);
 });
