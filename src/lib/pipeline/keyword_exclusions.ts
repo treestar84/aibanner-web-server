@@ -59,10 +59,40 @@ function buildRegexExclusionList(): RegExp[] {
 const EXACT_EXCLUSION_SET = buildExactExclusionSet();
 const PREFIX_EXCLUSION_LIST = buildPrefixExclusionList();
 const REGEX_EXCLUSION_LIST = buildRegexExclusionList();
+const BROAD_TOPIC_EXCLUSION_SET = new Set([
+  "mcp",
+  "mcp server",
+  "ai coding agent",
+  "ai coding agents",
+  "ai 코딩 에이전트",
+  "vibe coding",
+  "바이브코딩",
+  "ai agent infrastructure",
+  "rag system",
+  "rag 시스템",
+]);
+
+function normalizeBroadTopicKeyword(text: string): string {
+  return text
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\-·/@:]+/g, " ")
+    .replace(/[“”"'`~!#$%^&*()+=[\]{}|\\;<>?,.]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function isBroadTopicKeyword(keyword: string): boolean {
+  const normalized = normalizeBroadTopicKeyword(keyword);
+  if (BROAD_TOPIC_EXCLUSION_SET.has(normalized)) return true;
+  return BROAD_TOPIC_EXCLUSION_SET.has(normalized.replace(/\s+/g, ""));
+}
 
 export function isExcludedKeyword(keyword: string): boolean {
   const normalized = normalizeKeyword(keyword);
   if (normalized.length === 0) return false;
+
+  if (isBroadTopicKeyword(keyword)) return true;
 
   if (EXACT_EXCLUSION_SET.has(normalized)) return true;
 

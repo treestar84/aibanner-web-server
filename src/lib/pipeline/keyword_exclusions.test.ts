@@ -22,7 +22,6 @@ test("isExcludedKeyword: 기존 exact 항목(예: 'agent', 'a.i.', 'chatgpt')은
 
 test("isExcludedKeyword: exact 미일치 키워드는 통과한다", () => {
   assert.equal(isExcludedKeyword("Claude Opus 4.7"), false);
-  assert.equal(isExcludedKeyword("바이브 코딩"), false);
   assert.equal(isExcludedKeyword("Cursor Composer 2"), false);
 });
 
@@ -100,6 +99,51 @@ test("isExcludedKeyword: Category 5 추상 개념어는 차단된다", () => {
   assert.equal(isExcludedKeyword("루프 엔지니어링"), true);
   assert.equal(isExcludedKeyword("Codex 하네스 활용"), true);
   assert.equal(isExcludedKeyword("AI 컨텍스트 레이어"), true);
+});
+
+// ─── Realtime broad topic 차단 ───────────────────────────────────────────────
+
+test("isExcludedKeyword: 최근 운영에서 반복 노출된 broad topic exact 표면은 차단된다", () => {
+  // Given: 실시간 키워드로 부적합한 evergreen/broad topic 표면들.
+  const broadTopics = [
+    "MCP",
+    "MCP server",
+    "mcp-server",
+    "AI coding agent",
+    "AI coding agents",
+    "AI 코딩 에이전트",
+    "Vibe coding",
+    "바이브 코딩",
+    "바이브코딩",
+    "AI agent infrastructure",
+    "RAG System",
+    "RAG 시스템",
+  ];
+
+  // When / Then: 하이픈, 복수형, 한글 띄어쓰기 차이를 흡수해 차단한다.
+  assert.deepEqual(
+    broadTopics.map((keyword) => [keyword, isExcludedKeyword(keyword)]),
+    broadTopics.map((keyword) => [keyword, true])
+  );
+});
+
+test("isExcludedKeyword: broad topic을 포함해도 구체 앵커가 있으면 차단하지 않는다", () => {
+  // Given: broad topic 주변에 제품명, 버전, 구체 기능/아키텍처 앵커가 붙은 키워드.
+  const anchoredKeywords = [
+    "Claude Code MCP",
+    "MCP Server Architecture",
+    "LangChain RAG",
+    "Agentic RAG",
+    "Cursor for iOS",
+    "Gemini CLI",
+    "Claude Code v2.1.0",
+  ];
+
+  // When / Then: 부분 문자열 매칭으로 중요한 구체 키워드를 제거하지 않는다.
+  assert.deepEqual(
+    anchoredKeywords.map((keyword) => [keyword, isExcludedKeyword(keyword)]),
+    anchoredKeywords.map((keyword) => [keyword, false])
+  );
 });
 
 // ─── prefix/regex 비간섭 검증 (기존 호환) ───────────────────────────────────
