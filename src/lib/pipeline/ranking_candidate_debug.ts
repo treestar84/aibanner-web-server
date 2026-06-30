@@ -6,6 +6,7 @@ export interface RankingCandidateDebugInput {
   manualDelta: number;
   isInsertedManual: boolean;
   meta: KeywordPolicyMeta | null;
+  qualityReasons?: readonly string[];
 }
 
 export interface RankingCandidateDebug {
@@ -66,6 +67,7 @@ export function buildRankingCandidateDebug(
         ? "manual_insert"
         : "manual_boost"
       : null,
+    ...(input.qualityReasons ?? []).map((reason) => `quality:${reason}`),
   ].filter(Boolean);
 
   return {
