@@ -11,6 +11,10 @@ import {
   normalizeManualYoutubeText,
 } from "@/lib/manual-youtube";
 import { buildYoutubeChannelUrl } from "@/lib/youtube-recommend-channels";
+import type {
+  YouTubeVideoFilter,
+  YouTubeVideoType,
+} from "@/lib/youtube-video-type";
 import type { PipelineMode } from "@/lib/pipeline/mode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -130,6 +134,7 @@ export interface ManualYoutubeLink {
   video_url: string;
   thumbnail_url: string;
   published_at: string;
+  video_type: YouTubeVideoType;
   created_at: string;
   updated_at: string;
 }
@@ -161,14 +166,16 @@ function toManualYoutubeLink(row: ManualYoutubeLinkRow): ManualYoutubeLink {
 }
 
 function toYoutubeRecommendChannel(
-  row: YoutubeRecommendChannelRow
+  row: YoutubeRecommendChannelRow,
 ): YoutubeRecommendChannel {
   return row;
 }
 
 // ─── Manual keyword queries ───────────────────────────────────────────────────
 
-export async function listManualKeywords(mode?: PipelineMode): Promise<ManualKeyword[]> {
+export async function listManualKeywords(
+  mode?: PipelineMode,
+): Promise<ManualKeyword[]> {
   const rows = mode
     ? ((await sql`
       SELECT
@@ -202,7 +209,7 @@ export async function listManualKeywords(mode?: PipelineMode): Promise<ManualKey
 }
 
 export async function getActiveManualKeywords(
-  mode: PipelineMode
+  mode: PipelineMode,
 ): Promise<ManualKeyword[]> {
   const rows = (await sql`
     SELECT
@@ -225,13 +232,15 @@ export async function getActiveManualKeywords(
 }
 
 export async function getActiveManualKeywordIds(
-  mode: PipelineMode
+  mode: PipelineMode,
 ): Promise<Set<string>> {
   const items = await getActiveManualKeywords(mode);
   return new Set(items.map((item) => buildManualKeywordId(mode, item.keyword)));
 }
 
-export async function getManualKeywordById(id: number): Promise<ManualKeyword | null> {
+export async function getManualKeywordById(
+  id: number,
+): Promise<ManualKeyword | null> {
   const rows = (await sql`
     SELECT
       mk.*,
@@ -328,7 +337,7 @@ export async function upsertManualKeyword(input: {
 
 export async function extendManualKeyword(
   id: number,
-  ttlHours: number
+  ttlHours: number,
 ): Promise<ManualKeyword | null> {
   const current = await getManualKeywordById(id);
   if (!current) return null;
@@ -340,7 +349,7 @@ export async function extendManualKeyword(
       startsAt: current.starts_at,
       expiresAt: current.expires_at,
     },
-    sanitizedTtlHours
+    sanitizedTtlHours,
   );
 
   const rows = (await sql`
@@ -366,14 +375,13 @@ export async function extendManualKeyword(
 
 export async function setManualKeywordEnabled(
   id: number,
-  enabled: boolean
+  enabled: boolean,
 ): Promise<ManualKeyword | null> {
   const current = await getManualKeywordById(id);
   if (!current) return null;
 
   const shouldRestartWindow =
-    enabled &&
-    new Date(current.expires_at).getTime() <= Date.now();
+    enabled && new Date(current.expires_at).getTime() <= Date.now();
   const window = shouldRestartWindow
     ? buildManualKeywordWindow(current.ttl_hours)
     : null;
@@ -426,6 +434,7 @@ export async function listManualYoutubeLinks(): Promise<ManualYoutubeLink[]> {
       video_url,
       thumbnail_url,
       published_at,
+      video_type,
       created_at,
       updated_at
     FROM manual_youtube_links
@@ -436,7 +445,9 @@ export async function listManualYoutubeLinks(): Promise<ManualYoutubeLink[]> {
   return rows.map(toManualYoutubeLink);
 }
 
-export async function getManualYoutubeLinkById(id: number): Promise<ManualYoutubeLink | null> {
+export async function getManualYoutubeLinkById(
+  id: number,
+): Promise<ManualYoutubeLink | null> {
   const rows = (await sql`
     SELECT
       id,
@@ -446,6 +457,7 @@ export async function getManualYoutubeLinkById(id: number): Promise<ManualYoutub
       video_url,
       thumbnail_url,
       published_at,
+      video_type,
       created_at,
       updated_at
     FROM manual_youtube_links
@@ -462,12 +474,14 @@ export async function upsertManualYoutubeLink(input: {
   channelName?: string;
   videoUrl: string;
   publishedAt: string;
+  videoType?: YouTubeVideoType;
 }): Promise<ManualYoutubeLink> {
   const videoId = input.videoId.trim();
   const title = normalizeManualYoutubeText(input.title);
   const channelName = normalizeManualYoutubeText(input.channelName ?? "");
   const videoUrl = input.videoUrl.trim();
   const publishedAt = input.publishedAt;
+  const videoType = input.videoType ?? "unknown";
 
   if (!videoId) throw new Error("videoId is required");
   if (!title) throw new Error("title is required");
@@ -484,6 +498,7 @@ export async function upsertManualYoutubeLink(input: {
       video_url,
       thumbnail_url,
       published_at,
+      video_type,
       created_at,
       updated_at
     )
@@ -494,6 +509,7 @@ export async function upsertManualYoutubeLink(input: {
       ${videoUrl},
       ${thumbnailUrl},
       ${publishedAt},
+      ${videoType},
       NOW(),
       NOW()
     )
@@ -504,6 +520,10 @@ export async function upsertManualYoutubeLink(input: {
       video_url = EXCLUDED.video_url,
       thumbnail_url = EXCLUDED.thumbnail_url,
       published_at = EXCLUDED.published_at,
+      video_type = CASE
+        WHEN EXCLUDED.video_type <> 'unknown' THEN EXCLUDED.video_type
+        ELSE manual_youtube_links.video_type
+      END,
       updated_at = NOW()
     RETURNING
       id,
@@ -513,6 +533,7 @@ export async function upsertManualYoutubeLink(input: {
       video_url,
       thumbnail_url,
       published_at,
+      video_type,
       created_at,
       updated_at
   `) as ManualYoutubeLinkRow[];
@@ -528,7 +549,8 @@ export async function updateManualYoutubeLink(
     channelName?: string;
     videoUrl: string;
     publishedAt: string;
-  }
+    videoType?: YouTubeVideoType;
+  },
 ): Promise<ManualYoutubeLink | null> {
   const current = await getManualYoutubeLinkById(id);
   if (!current) return null;
@@ -538,6 +560,11 @@ export async function updateManualYoutubeLink(
   const channelName = normalizeManualYoutubeText(input.channelName ?? "");
   const videoUrl = input.videoUrl.trim();
   const publishedAt = input.publishedAt;
+  const requestedVideoType = input.videoType ?? "unknown";
+  const videoType =
+    requestedVideoType === "unknown" && current.video_id === videoId
+      ? current.video_type
+      : requestedVideoType;
 
   if (!videoId) throw new Error("videoId is required");
   if (!title) throw new Error("title is required");
@@ -564,6 +591,7 @@ export async function updateManualYoutubeLink(
       video_url = ${videoUrl},
       thumbnail_url = ${buildYoutubeThumbnailUrl(videoId)},
       published_at = ${publishedAt},
+      video_type = ${videoType},
       updated_at = NOW()
     WHERE id = ${id}
     RETURNING
@@ -574,6 +602,7 @@ export async function updateManualYoutubeLink(
       video_url,
       thumbnail_url,
       published_at,
+      video_type,
       created_at,
       updated_at
   `) as ManualYoutubeLinkRow[];
@@ -593,7 +622,9 @@ export async function deleteManualYoutubeLink(id: number): Promise<boolean> {
 
 // ─── YouTube recommend channel queries ───────────────────────────────────────
 
-export async function listYoutubeRecommendChannels(): Promise<YoutubeRecommendChannel[]> {
+export async function listYoutubeRecommendChannels(): Promise<
+  YoutubeRecommendChannel[]
+> {
   const rows = (await sql`
     SELECT
       yrc.id,
@@ -621,7 +652,7 @@ export async function listYoutubeRecommendChannels(): Promise<YoutubeRecommendCh
 }
 
 export async function getYoutubeRecommendChannelById(
-  id: number
+  id: number,
 ): Promise<YoutubeRecommendChannel | null> {
   const rows = (await sql`
     SELECT
@@ -654,8 +685,9 @@ export async function upsertYoutubeRecommendChannel(input: {
   const channelId = input.channelId.trim();
   const channelName = normalizeManualYoutubeText(input.channelName);
   const channelHandle = normalizeManualYoutubeText(input.channelHandle ?? "");
-  const channelUrl = (input.channelUrl?.trim() ||
-    buildYoutubeChannelUrl(channelId, channelHandle));
+  const channelUrl =
+    input.channelUrl?.trim() ||
+    buildYoutubeChannelUrl(channelId, channelHandle);
 
   if (!channelId) throw new Error("channelId is required");
   if (!channelName) throw new Error("channelName is required");
@@ -705,7 +737,7 @@ export async function updateYoutubeRecommendChannel(
     channelName: string;
     channelHandle?: string;
     channelUrl?: string;
-  }
+  },
 ): Promise<YoutubeRecommendChannel | null> {
   const current = await getYoutubeRecommendChannelById(id);
   if (!current) return null;
@@ -713,8 +745,9 @@ export async function updateYoutubeRecommendChannel(
   const channelId = input.channelId.trim();
   const channelName = normalizeManualYoutubeText(input.channelName);
   const channelHandle = normalizeManualYoutubeText(input.channelHandle ?? "");
-  const channelUrl = (input.channelUrl?.trim() ||
-    buildYoutubeChannelUrl(channelId, channelHandle));
+  const channelUrl =
+    input.channelUrl?.trim() ||
+    buildYoutubeChannelUrl(channelId, channelHandle);
 
   if (!channelId) throw new Error("channelId is required");
   if (!channelName) throw new Error("channelName is required");
@@ -754,7 +787,9 @@ export async function updateYoutubeRecommendChannel(
   return rows[0] ? toYoutubeRecommendChannel(rows[0]) : null;
 }
 
-export async function deleteYoutubeRecommendChannel(id: number): Promise<boolean> {
+export async function deleteYoutubeRecommendChannel(
+  id: number,
+): Promise<boolean> {
   const rows = (await sql`
     DELETE FROM youtube_recommend_channels
     WHERE id = ${id}
@@ -767,7 +802,7 @@ export async function deleteYoutubeRecommendChannel(id: number): Promise<boolean
 // ─── Snapshot queries ─────────────────────────────────────────────────────────
 
 export async function getLatestSnapshot(
-  mode?: PipelineMode
+  mode?: PipelineMode,
 ): Promise<Snapshot | null> {
   const rows = mode
     ? ((await sql`
@@ -785,7 +820,7 @@ export async function getLatestSnapshot(
 }
 
 export async function getLatestSnapshotWithKeywords(
-  mode?: PipelineMode
+  mode?: PipelineMode,
 ): Promise<Snapshot | null> {
   const rows = mode
     ? ((await sql`
@@ -812,7 +847,7 @@ export async function getLatestSnapshotWithKeywords(
 
 export async function getRecentSnapshots(
   limit: number,
-  mode?: PipelineMode
+  mode?: PipelineMode,
 ): Promise<Snapshot[]> {
   if (mode) {
     return (await sql`
@@ -874,7 +909,7 @@ export async function upsertSourceIngestionState(state: {
 
 export async function findCachedKeyword(
   keywordId: string,
-  recentSnapshotIds: string[]
+  recentSnapshotIds: string[],
 ): Promise<{ keyword: Keyword; sources: Source[] } | null> {
   if (recentSnapshotIds.length === 0) return null;
 
@@ -895,7 +930,7 @@ export async function findCachedKeyword(
 }
 
 export async function getSnapshotById(
-  snapshotId: string
+  snapshotId: string,
 ): Promise<Snapshot | null> {
   const rows = (await sql`
     SELECT * FROM snapshots WHERE snapshot_id = ${snapshotId}
@@ -903,7 +938,9 @@ export async function getSnapshotById(
   return rows[0] ?? null;
 }
 
-export async function insertSnapshot(snapshot: Omit<Snapshot, "created_at">): Promise<void> {
+export async function insertSnapshot(
+  snapshot: Omit<Snapshot, "created_at">,
+): Promise<void> {
   await sql`
     INSERT INTO snapshots (snapshot_id, pipeline_mode, updated_at_utc, next_update_at_utc)
     VALUES (
@@ -916,7 +953,9 @@ export async function insertSnapshot(snapshot: Omit<Snapshot, "created_at">): Pr
   `;
 }
 
-export async function deleteSnapshotIfEmpty(snapshotId: string): Promise<boolean> {
+export async function deleteSnapshotIfEmpty(
+  snapshotId: string,
+): Promise<boolean> {
   const rows = (await sql`
     DELETE FROM snapshots s
     WHERE s.snapshot_id = ${snapshotId}
@@ -934,7 +973,7 @@ export async function deleteSnapshotIfEmpty(snapshotId: string): Promise<boolean
 
 export async function getTopKeywords(
   snapshotId: string,
-  limit = 10
+  limit = 10,
 ): Promise<Keyword[]> {
   return (await sql`
     SELECT * FROM keywords
@@ -948,7 +987,7 @@ export async function getHotKeywords(
   lifecycleDays: number,
   limit = 10,
   topRankLimit = 10,
-  mode?: PipelineMode
+  mode?: PipelineMode,
 ): Promise<HotKeyword[]> {
   if (mode) {
     return (await sql`
@@ -1021,7 +1060,7 @@ export async function getHotKeywords(
 
 export async function getKeywordById(
   keywordId: string,
-  snapshotId: string
+  snapshotId: string,
 ): Promise<Keyword | null> {
   const rows = (await sql`
     SELECT * FROM keywords
@@ -1031,7 +1070,7 @@ export async function getKeywordById(
 }
 
 export async function getKeywordInLatestSnapshot(
-  keywordId: string
+  keywordId: string,
 ): Promise<Keyword | null> {
   const rows = (await sql`
     SELECT k.* FROM keywords k
@@ -1045,7 +1084,9 @@ export async function getKeywordInLatestSnapshot(
   return rows[0] ?? null;
 }
 
-export async function insertKeyword(keyword: Omit<Keyword, "created_at">): Promise<void> {
+export async function insertKeyword(
+  keyword: Omit<Keyword, "created_at">,
+): Promise<void> {
   await sql`
     INSERT INTO keywords (
       snapshot_id, keyword_id, keyword, keyword_ko, keyword_en, rank, delta_rank, is_new,
@@ -1080,21 +1121,20 @@ function detectAliasLang(alias: string): "ko" | "en" {
 
 export async function upsertKeywordAliases(
   canonicalKeywordId: string,
-  aliases: string[]
+  aliases: string[],
 ): Promise<void> {
   const normalizedCanonicalId = canonicalKeywordId.trim();
   if (!normalizedCanonicalId) return;
 
-  const dedupedAliases = [...new Set(
-    aliases
-      .map(normalizeAlias)
-      .filter((alias) => alias.length > 0)
-  )].slice(0, 30);
+  const dedupedAliases = [
+    ...new Set(aliases.map(normalizeAlias).filter((alias) => alias.length > 0)),
+  ].slice(0, 30);
   if (dedupedAliases.length === 0) return;
 
   await Promise.all(
-    dedupedAliases.map((alias) =>
-      sql`
+    dedupedAliases.map(
+      (alias) =>
+        sql`
         INSERT INTO keyword_aliases (
           canonical_keyword_id,
           alias,
@@ -1106,14 +1146,14 @@ export async function upsertKeywordAliases(
           ${detectAliasLang(alias)}
         )
         ON CONFLICT (canonical_keyword_id, alias) DO NOTHING
-      `
-    )
+      `,
+    ),
   );
 }
 
 export async function getPreviousRanks(
   snapshotId: string,
-  keywordIds: string[]
+  keywordIds: string[],
 ): Promise<Map<string, number>> {
   if (keywordIds.length === 0) return new Map();
 
@@ -1136,7 +1176,7 @@ export async function getPreviousRanks(
 /** 최근 N개 스냅샷에서 각 keywordId의 rank를 조회 (cross-snapshot trending용) */
 export async function getRankHistory(
   snapshotIds: string[],
-  keywordIds: string[]
+  keywordIds: string[],
 ): Promise<Map<string, number[]>> {
   if (snapshotIds.length === 0 || keywordIds.length === 0) return new Map();
 
@@ -1165,7 +1205,7 @@ export async function getRankHistory(
 
 export async function getSourcesByKeyword(
   snapshotId: string,
-  keywordId: string
+  keywordId: string,
 ): Promise<Source[]> {
   return (await sql`
     SELECT * FROM sources
@@ -1186,7 +1226,7 @@ export async function getSourcesByKeyword(
 }
 
 export async function insertSource(
-  source: Omit<Source, "id" | "created_at">
+  source: Omit<Source, "id" | "created_at">,
 ): Promise<void> {
   await sql`
     INSERT INTO sources (snapshot_id, keyword_id, type, title, url, domain, published_at_utc, snippet, image_url, title_ko, title_en)
@@ -1210,7 +1250,9 @@ export async function insertSource(
 
 // ─── Retention / archival queries ─────────────────────────────────────────────
 
-export async function upsertKeywordDailyStats(aggregateDays: number): Promise<number> {
+export async function upsertKeywordDailyStats(
+  aggregateDays: number,
+): Promise<number> {
   const rows = (await sql`
     WITH daily AS (
       SELECT
@@ -1270,7 +1312,7 @@ export async function upsertKeywordDailyStats(aggregateDays: number): Promise<nu
 }
 
 export async function deleteDailyKeywordStatsOlderThan(
-  aggregateDays: number
+  aggregateDays: number,
 ): Promise<number> {
   const rows = (await sql`
     DELETE FROM keyword_daily_stats
@@ -1283,7 +1325,7 @@ export async function deleteDailyKeywordStatsOlderThan(
 
 export async function getKeywordSparkline(
   keywordId: string,
-  days = 7
+  days = 7,
 ): Promise<number[]> {
   const rows = (await sql`
     SELECT appearance_count
@@ -1296,7 +1338,7 @@ export async function getKeywordSparkline(
 }
 
 export async function deleteSourcesOlderThan(
-  detailedDays: number
+  detailedDays: number,
 ): Promise<number> {
   const rows = (await sql`
     DELETE FROM sources src
@@ -1310,7 +1352,7 @@ export async function deleteSourcesOlderThan(
 }
 
 export async function deleteKeywordsOlderThan(
-  detailedDays: number
+  detailedDays: number,
 ): Promise<number> {
   const rows = (await sql`
     DELETE FROM keywords k
@@ -1324,7 +1366,7 @@ export async function deleteKeywordsOlderThan(
 }
 
 export async function deleteSnapshotsOlderThan(
-  detailedDays: number
+  detailedDays: number,
 ): Promise<number> {
   const rows = (await sql`
     DELETE FROM snapshots s
@@ -1351,7 +1393,7 @@ export async function deleteOrphanKeywordAliases(): Promise<number> {
 
 export async function deleteKeywordViewCountsOutsideLifecycle(
   lifecycleDays: number,
-  topRankLimit = 10
+  topRankLimit = 10,
 ): Promise<number> {
   const rows = (await sql`
     DELETE FROM keyword_view_counts vc
@@ -1372,17 +1414,17 @@ export async function deleteKeywordViewCountsOutsideLifecycle(
 export async function applyRetentionPolicy(
   detailedDays: number,
   aggregateDays: number,
-  keywordViewLifecycleDays: number
+  keywordViewLifecycleDays: number,
 ): Promise<RetentionCounts> {
   const aggregatedRows = await upsertKeywordDailyStats(aggregateDays);
-  const deletedDailyStats = await deleteDailyKeywordStatsOlderThan(aggregateDays);
+  const deletedDailyStats =
+    await deleteDailyKeywordStatsOlderThan(aggregateDays);
   const deletedSources = await deleteSourcesOlderThan(detailedDays);
   const deletedKeywords = await deleteKeywordsOlderThan(detailedDays);
   const deletedSnapshots = await deleteSnapshotsOlderThan(detailedDays);
   const deletedKeywordAliases = await deleteOrphanKeywordAliases();
-  const deletedKeywordViewCounts = await deleteKeywordViewCountsOutsideLifecycle(
-    keywordViewLifecycleDays
-  );
+  const deletedKeywordViewCounts =
+    await deleteKeywordViewCountsOutsideLifecycle(keywordViewLifecycleDays);
 
   return {
     aggregatedRows,
@@ -1400,7 +1442,7 @@ export async function applyRetentionPolicy(
 export async function searchKeywordsByText(
   query: string,
   snapshotId: string,
-  limit = 5
+  limit = 5,
 ): Promise<Keyword[]> {
   const pattern = `%${query}%`;
   return (await sql`
@@ -1429,7 +1471,9 @@ export async function incrementSearchCount(query: string): Promise<void> {
   `;
 }
 
-export async function incrementKeywordViewCount(keywordId: string): Promise<void> {
+export async function incrementKeywordViewCount(
+  keywordId: string,
+): Promise<void> {
   const normalized = keywordId.trim();
   if (!normalized) return;
 
@@ -1447,6 +1491,16 @@ export async function incrementKeywordViewCount(keywordId: string): Promise<void
         last_viewed_at = NOW(),
         updated_at = NOW()
   `;
+}
+
+export async function incrementKeywordViewCountBatch(
+  keywordIds: string[],
+): Promise<void> {
+  const normalized = [
+    ...new Set(keywordIds.map((id) => id.trim()).filter(Boolean)),
+  ];
+  if (!normalized.length) return;
+  await Promise.all(normalized.map((id) => incrementKeywordViewCount(id)));
 }
 
 // ─── Snapshot candidates (ranking simulator) ─────────────────────────────────
@@ -1479,13 +1533,14 @@ export interface SnapshotCandidate {
 
 export async function insertSnapshotCandidates(
   snapshotId: string,
-  candidates: Omit<SnapshotCandidate, "snapshot_id">[]
+  candidates: Omit<SnapshotCandidate, "snapshot_id">[],
 ): Promise<void> {
   if (candidates.length === 0) return;
 
   await Promise.all(
-    candidates.map((c) =>
-      sql`
+    candidates.map(
+      (c) =>
+        sql`
         INSERT INTO snapshot_candidates (
           snapshot_id, keyword, keyword_normalized,
           score_recency, score_frequency, score_authority, score_velocity, score_engagement, score_internal,
@@ -1504,13 +1559,13 @@ export async function insertSnapshotCandidates(
           ${c.keyword_kind}, ${c.version_kind}, ${c.internal_reason}
         )
         ON CONFLICT (snapshot_id, keyword_normalized) DO NOTHING
-      `
-    )
+      `,
+    ),
   );
 }
 
 export async function getSnapshotCandidates(
-  snapshotId: string
+  snapshotId: string,
 ): Promise<SnapshotCandidate[]> {
   return (await sql`
     SELECT * FROM snapshot_candidates
@@ -1543,15 +1598,17 @@ export async function getRankingWeights(): Promise<RankingWeights> {
   const fallback = (await sql`
     SELECT * FROM ranking_weights WHERE id = 1
   `) as RankingWeights[];
-  return fallback[0] ?? {
-    w_recency: 0.28,
-    w_frequency: 0.12,
-    w_authority: 0.08,
-    w_velocity: 0.30,
-    w_engagement: 0.22,
-    w_internal: 0.00,
-    updated_at: new Date().toISOString(),
-  };
+  return (
+    fallback[0] ?? {
+      w_recency: 0.28,
+      w_frequency: 0.12,
+      w_authority: 0.08,
+      w_velocity: 0.3,
+      w_engagement: 0.22,
+      w_internal: 0.0,
+      updated_at: new Date().toISOString(),
+    }
+  );
 }
 
 export async function upsertRankingWeights(weights: {
@@ -1592,13 +1649,42 @@ export interface YouTubeVideo {
   published_at: string;
   view_count: number | null;
   like_count: number | null;
+  duration_seconds: number | null;
+  video_type: YouTubeVideoType;
 }
 
-export async function getRecentYoutubeVideos(limit = 20): Promise<YouTubeVideo[]> {
+export async function getRecentYoutubeVideos(
+  limit = 20,
+  filter: YouTubeVideoFilter = "longform",
+): Promise<YouTubeVideo[]> {
+  if (filter === "shorts") {
+    const rows = await sql`
+      SELECT id, video_id, channel_id, channel_name, title, thumbnail_url, video_url,
+             published_at, view_count, like_count, duration_seconds, video_type
+      FROM youtube_videos
+      WHERE video_type = 'shorts'
+      ORDER BY published_at DESC
+      LIMIT ${limit}
+    `;
+    return rows as YouTubeVideo[];
+  }
+
+  if (filter === "all") {
+    const rows = await sql`
+      SELECT id, video_id, channel_id, channel_name, title, thumbnail_url, video_url,
+             published_at, view_count, like_count, duration_seconds, video_type
+      FROM youtube_videos
+      ORDER BY published_at DESC
+      LIMIT ${limit}
+    `;
+    return rows as YouTubeVideo[];
+  }
+
   const rows = await sql`
     SELECT id, video_id, channel_id, channel_name, title, thumbnail_url, video_url,
-           published_at, view_count, like_count
+           published_at, view_count, like_count, duration_seconds, video_type
     FROM youtube_videos
+    WHERE video_type IN ('longform', 'unknown')
     ORDER BY published_at DESC
     LIMIT ${limit}
   `;
@@ -1606,14 +1692,14 @@ export async function getRecentYoutubeVideos(limit = 20): Promise<YouTubeVideo[]
 }
 
 export async function getYoutubeVideoByVideoId(
-  videoId: string
+  videoId: string,
 ): Promise<YouTubeVideo | null> {
   const normalized = videoId.trim();
   if (!normalized) return null;
 
   const rows = await sql`
     SELECT id, video_id, channel_id, channel_name, title, thumbnail_url, video_url,
-           published_at, view_count, like_count
+           published_at, view_count, like_count, duration_seconds, video_type
     FROM youtube_videos
     WHERE video_id = ${normalized}
     LIMIT 1
@@ -1646,7 +1732,9 @@ export interface PromoContent {
   updated_at: string;
 }
 
-export async function listPromoContents(enabledOnly = false): Promise<PromoContent[]> {
+export async function listPromoContents(
+  enabledOnly = false,
+): Promise<PromoContent[]> {
   const rows = enabledOnly
     ? await sql`
         SELECT * FROM promo_contents
@@ -1666,7 +1754,9 @@ export async function getPromoMaxUpdatedAt(): Promise<string | null> {
     FROM promo_contents
     WHERE enabled = TRUE
   `;
-  return (rows as { max_updated_at: string | null }[])[0]?.max_updated_at ?? null;
+  return (
+    (rows as { max_updated_at: string | null }[])[0]?.max_updated_at ?? null
+  );
 }
 
 export async function insertPromoContent(input: {
@@ -1724,7 +1814,7 @@ export async function updatePromoContent(
     linkUrl?: string;
     sortOrder?: number;
     enabled?: boolean;
-  }
+  },
 ): Promise<PromoContent | null> {
   const rows = await sql`
     UPDATE promo_contents SET
