@@ -1,7 +1,12 @@
+import type { YouTubeVideoType } from "@/lib/youtube-video-type";
+
 const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 
 function normalizeHost(hostname: string): string {
-  return hostname.trim().toLowerCase().replace(/^www\./, "");
+  return hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
 }
 
 function extractPathVideoId(pathname: string): string | null {
@@ -11,7 +16,11 @@ function extractPathVideoId(pathname: string): string | null {
     .filter((segment) => segment.length > 0);
 
   if (segments.length === 0) return null;
-  if (segments[0] === "shorts" || segments[0] === "embed" || segments[0] === "live") {
+  if (
+    segments[0] === "shorts" ||
+    segments[0] === "embed" ||
+    segments[0] === "live"
+  ) {
     return YOUTUBE_ID_PATTERN.test(segments[1] ?? "") ? segments[1] : null;
   }
 
@@ -49,7 +58,11 @@ export function extractYoutubeVideoId(input: string): string | null {
   return null;
 }
 
-export function normalizeYoutubeVideoUrl(input: string): { videoId?: string; url?: string; error?: string } {
+export function normalizeYoutubeVideoUrl(input: string): {
+  videoId?: string;
+  url?: string;
+  error?: string;
+} {
   const videoId = extractYoutubeVideoId(input);
   if (!videoId) {
     return { error: "유효한 YouTube 링크 또는 영상 ID를 입력해 주세요." };
@@ -58,6 +71,24 @@ export function normalizeYoutubeVideoUrl(input: string): { videoId?: string; url
     videoId,
     url: `https://www.youtube.com/watch?v=${videoId}`,
   };
+}
+
+export function resolveManualVideoType(input: {
+  inputVideoType: YouTubeVideoType;
+  videoId: string;
+  existingVideoType?: YouTubeVideoType;
+  existingManualVideoId?: string;
+  existingManualVideoType?: YouTubeVideoType;
+}): YouTubeVideoType {
+  if (input.inputVideoType !== "unknown") return input.inputVideoType;
+  if (
+    input.existingManualVideoId === input.videoId &&
+    input.existingManualVideoType
+  ) {
+    return input.existingManualVideoType;
+  }
+  if (input.existingVideoType) return input.existingVideoType;
+  return "unknown";
 }
 
 export function buildYoutubeThumbnailUrl(videoId: string): string {

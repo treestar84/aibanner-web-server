@@ -7,6 +7,16 @@ const MINIMUM_RANKED_KEYWORD_COUNT = 20;
 const RELEVANCE_MIN = 7;
 const NOVELTY_MIN = 6;
 const LEGACY_RELEVANCE_MIN = 5;
+// 커뮤니티(engagement 보유) 화제 키워드는 버전/출시 이벤트가 없어도 트렌드일 수 있어
+// novelty 하한을 완화한다. (SNS 바이럴 데모/논쟁류 누락 방지)
+const NOVELTY_MIN_HIGH_ENGAGEMENT = 4;
+// score + comments*2 합산이 이 값 이상이면 high-engagement로 간주
+const HIGH_ENGAGEMENT_COMBINED = 300;
+// 명시적으로 novelty ≤ 3 (evergreen 판정)을 받은 키워드는 백필로도 부활 금지
+// ("MCP server" 같은 generic 용어가 한산한 날 Top20에 재진입하는 누수 차단)
+const BACKFILL_NOVELTY_CUTOFF = 3;
+// LLM 응답에서 점수가 누락된 키워드: 자동 통과 대신 백필 최우선 후보로만 취급
+const MISSING_SCORE_BACKFILL_QUALITY = 50;
 
 const AUDIENCE_RELEVANCE_PROMPT = `Score each keyword on TWO separate axes for vibe coders — developers who use Claude Code, Cursor, Copilot, Codex CLI, Windsurf daily.
 
@@ -56,6 +66,8 @@ type AudienceScoreMap = Readonly<Record<string, AudienceScore>>;
 
 interface SelectionOptions {
   readonly minimumKeywordCount?: number;
+  /** engagement 합산이 높은 키워드 ID 집합 — novelty 하한 완화 대상 */
+  readonly highEngagementKeywordIds?: ReadonlySet<string>;
 }
 
 interface ScoredKeyword {
@@ -63,6 +75,8 @@ interface ScoredKeyword {
   readonly index: number;
   readonly relevant: boolean;
   readonly quality: number;
+  /** false면 minimum 미달 시에도 백필로 재진입 불가 (명시적 evergreen 판정) */
+  readonly backfillEligible: boolean;
 }
 
 export function selectAudienceRelevantKeywords(
@@ -71,7 +85,10 @@ export function selectAudienceRelevantKeywords(
   options: SelectionOptions = {}
 ): NormalizedKeyword[] {
   const minimumKeywordCount = options.minimumKeywordCount ?? MINIMUM_RANKED_KEYWORD_COUNT;
-  const scored = keywords.map((keyword, index) => scoreKeyword(keyword, scores, index));
+  const highEngagementIds = options.highEngagementKeywordIds ?? new Set<string>();
+  const scored = keywords.map((keyword, index) =>
+    scoreKeyword(keyword, scores, index, highEngagementIds.has(keyword.keywordId))
+  );
   const visible = scored.filter((entry) => entry.relevant);
 
   if (visible.length >= minimumKeywordCount || visible.length === keywords.length) {
@@ -80,7 +97,10 @@ export function selectAudienceRelevantKeywords(
 
   const selectedIds = new Set(visible.map((entry) => entry.keyword.keywordId));
   const backfill = scored
-    .filter((entry) => !selectedIds.has(entry.keyword.keywordId))
+    .filter(
+      (entry) =>
+        !selectedIds.has(entry.keyword.keywordId) && entry.backfillEligible
+    )
     .sort((a, b) => b.quality - a.quality || a.index - b.index)
     .slice(0, minimumKeywordCount - visible.length);
 
@@ -101,6 +121,8 @@ export async function filterByAudienceRelevance(
     titles: buildKeywordTitles(keyword, items),
   }));
 
+  const highEngagementKeywordIds = buildHighEngagementKeywordIds(keywords, items);
+
   const client = new OpenAI();
 
   try {
@@ -118,7 +140,9 @@ export async function filterByAudienceRelevance(
     if (!jsonMatch) return keywords;
 
     const scores = JSON.parse(jsonMatch[0]) as AudienceScoreMap;
-    const selected = selectAudienceRelevantKeywords(keywords, scores);
+    const selected = selectAudienceRelevantKeywords(keywords, scores, {
+      highEngagementKeywordIds,
+    });
     logAudienceSelection(keywords, selected, scores);
     return selected;
   } catch (err) {
@@ -130,11 +154,20 @@ export async function filterByAudienceRelevance(
 function scoreKeyword(
   keyword: NormalizedKeyword,
   scores: AudienceScoreMap,
-  index: number
+  index: number,
+  highEngagement: boolean
 ): ScoredKeyword {
   const score = scores[keyword.keyword];
   if (score == null) {
-    return { keyword, index, relevant: true, quality: 100 };
+    // LLM이 점수를 누락한 키워드: 무조건 통과시키지 않고
+    // minimum 미달 시 백필 최우선 후보로만 살린다.
+    return {
+      keyword,
+      index,
+      relevant: false,
+      quality: MISSING_SCORE_BACKFILL_QUALITY,
+      backfillEligible: true,
+    };
   }
 
   if (typeof score === "number") {
@@ -143,17 +176,39 @@ function scoreKeyword(
       index,
       relevant: score >= LEGACY_RELEVANCE_MIN,
       quality: score,
+      backfillEligible: score > BACKFILL_NOVELTY_CUTOFF,
     };
   }
 
   const relevance = score.relevance ?? 10;
   const novelty = score.novelty ?? 10;
+  const noveltyMin = highEngagement ? NOVELTY_MIN_HIGH_ENGAGEMENT : NOVELTY_MIN;
   return {
     keyword,
     index,
-    relevant: relevance >= RELEVANCE_MIN && novelty >= NOVELTY_MIN,
+    relevant: relevance >= RELEVANCE_MIN && novelty >= noveltyMin,
     quality: relevance + novelty / 10,
+    backfillEligible: novelty > BACKFILL_NOVELTY_CUTOFF,
   };
+}
+
+function buildHighEngagementKeywordIds(
+  keywords: readonly NormalizedKeyword[],
+  items: readonly RssItem[]
+): Set<string> {
+  const ids = new Set<string>();
+  for (const keyword of keywords) {
+    let combined = 0;
+    for (const index of keyword.candidates.matchedItems) {
+      const engagement = items[index]?.engagement;
+      if (!engagement) continue;
+      combined += engagement.score + engagement.comments * 2;
+    }
+    if (combined >= HIGH_ENGAGEMENT_COMBINED) {
+      ids.add(keyword.keywordId);
+    }
+  }
+  return ids;
 }
 
 function buildKeywordTitles(keyword: NormalizedKeyword, items: readonly RssItem[]): string[] {

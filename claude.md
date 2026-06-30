@@ -13,7 +13,8 @@
 - `/api/cron/snapshot` (`GET/POST`): 스냅샷 파이프라인 + retention 실행(`CRON_SECRET` 지원).
 
 ## 2) 파이프라인 실제 동작(압축)
-- 소스 수집: RSS + HN + GDELT + GitHub(Repo/Release/MD) + YouTube + Changelog + Product Hunt + Reddit + **Techmeme** + **Google Alerts**.
+- 키워드 후보 수집 루트: `SOURCE_PLANS` 기준 **16개**.
+- 소스 수집: Product Hunt + RSS + HN + GDELT + GitHub(Repo/MD/Release) + YouTube + Changelog + Techmeme + Google Alerts + Reddit + **OpenRouter** + **Hugging Face** + **Vendor Announcements** + **Bluesky**.
 - 키워드화: LLM 추출(`gpt-4o-mini`) + 다중 하드필터(제네릭/비AI/헤드라인/미디어명 등) + exact exclusion JSON.
 - 랭킹화: recency/frequency/authority/internal 가중치 + delta rank + 신규 보너스.
 - 저장전략: `Top1~10`은 요약/소스/이미지까지 상세 저장, `Top11~20`은 lightweight 저장.
@@ -29,12 +30,13 @@
 - `src/lib/db/*`: Neon SQL 클라이언트, 쿼리, 스키마.
 - `src/config/keyword-exclusions.json`: exact 키워드 제외 목록.
 - `scripts/db/migrate.ts`: SQL 스키마 적용 스크립트.
-- `.github/workflows/cron_realtime.yml`: KST `05:00`, `11:00`, `17:00`, `23:00` 스냅샷 트리거.
+- `.github/workflows/cron_realtime.yml`: KST `09:10`, `11:10`, `13:10`, `15:10` 스냅샷 트리거.
 
 ## 4) 소셜 소스 수집 현황
 - `socialQuery`: `site:threads.net OR site:reddit.com OR site:dev.to OR site:x.com OR site:twitter.com OR site:facebook.com OR site:clien.net`
 - 소셜 버킷 한국 소스 우선순위 가중치: **+0.6** (뉴스/데이터 버킷은 +1.2 유지) → X/Reddit 등 글로벌 소셜 진입 공간 확보
 - X.com/Threads.net은 Tavily 크롤링 제약으로 실제 수집 불안정. 공식 API 연동 미구현.
+- Bluesky는 키워드 후보 수집 루트에 직접 포함됨. GitHub/HF 링크 도메인 필터와 큐레이션 계정 3종을 사용하고, 검색 채널은 engagement 3 이상 및 AI 관련성 정규식을 통과해야 함.
 - `/api/v1/keywords/:id` 응답에 `deeplinks` 필드(x_search, threads_search, youtube_search, github_search) 포함.
 
 ## 5) 키워드 파이프라인 주요 설계 결정
@@ -43,7 +45,27 @@
 - **appearances 임계값**: cron 4x/day 기준으로 `>= 8 && < 12`(2~3일), `>= 12`(evergreen 패널티) 로 재조정. 기존 값은 1x/day 기준이었음.
 - **version_release delta**: 단순 flat delta → authority/domain/engagement 기반 조건부 delta. 권위 있는 소스의 major 릴리즈는 +0.04, 단일 소스 낮은 릴리즈는 +0.005 유지.
 
-## 6) 구현 갭/주의(현재 코드 기준)
+## 6) 보안 & Rate Limiting (2026-06-06 적용·배포 완료)
+- **`src/middleware.ts`**: `/api/v1/*` 전체에 IP 기반 슬라이딩 윈도우 Rate Limiting 적용.
+  - `/api/v1/search`: 10 RPM — Tavily 비용 보호
+  - `/api/v1/trends`: 30 RPM
+  - `/api/v1/keywords`: 60 RPM
+  - `/api/v1/` 기타: 100 RPM
+  - 한도 초과 시 `429 Too Many Requests` + `Retry-After: 60` 헤더 반환.
+  - 인스턴스 내 메모리 기반(Redis 미사용). 최대 10,000 엔트리, 만료 항목 자동 정리.
+- **`POST /api/v1/keywords/{id}/view`**: 동일 IP + 동일 keyword 조합 1시간 쿨다운 적용. 중복 시 DB 집계 생략 (`{ ok: true, skipped: true }` 반환).
+
+## 7) 배치 조회수 집계 (2026-06-06 적용·배포 완료)
+- 기존 `/keywords/:id/view` 개별 POST → Flutter `ViewBatchQueue`로 전환.
+- **신규 엔드포인트**: `POST /api/v1/keywords/views` — `{ ids: string[] }` 최대 20개 일괄 집계.
+  - `src/app/api/v1/keywords/views/route.ts`
+  - `src/lib/db/queries.ts` → `incrementKeywordViewCountBatch()`
+- **Flutter 큐 규칙**: 세션 내 Set 중복 제거 → 5개 누적 또는 앱 백그라운드 진입 시 flush. 타이머 없음.
+- 효과: 하루 최대 150,000 함수 호출 → 약 9,000건 (94% 감소).
+
+## 8) 구현 갭/주의(현재 코드 기준)
 - `keyword_aliases` 테이블은 검색 join에 사용되며 스냅샷 처리 시 canonical/ko/en alias를 upsert함.
+- `snapshot.ts`의 수집 결과는 `SOURCE_PLANS` 배열 순서와 구조 분해 순서가 반드시 일치해야 함. 과거 12개 plan 대비 10개만 구조 분해해 `reddit`, `google_alerts` 결과가 유실되고 `techmeme`이 잘못 매핑되던 문제가 있었으므로, 신규 수집기 추가 시 이 주석과 테스트를 함께 확인.
 - `.env.example`에는 현재 미사용 키(`UPSTASH`, `RATE_LIMIT_RPM`, `TAVILY_WEB_RESULTS`)가 남아 있음. Naver 보강은 `NAVER_CLIENT_ID/SECRET`이 있을 때만 활성화됨.
+- Rate Limiting은 Vercel 다중 인스턴스 간 공유 안됨(Redis 미도입). 단일 봇 burst 차단에는 효과적.
 - README의 과거 설명(`lib/kv`)과 실제 구조가 불일치할 수 있어 문서 정합성 유지 필요.

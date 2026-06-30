@@ -5,6 +5,10 @@ import {
   upsertManualYoutubeLink,
 } from "@/lib/db/queries";
 import { resolveManualYoutubeLink } from "@/lib/manual-youtube-resolver";
+import {
+  normalizeYouTubeVideoType,
+  type YouTubeVideoType,
+} from "@/lib/youtube-video-type";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -12,7 +16,7 @@ export const revalidate = 0;
 function parseRequiredText(
   value: unknown,
   field: string,
-  maxLength: number
+  maxLength: number,
 ): { value?: string; error?: string } {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text) return { error: `${field} is required` };
@@ -20,6 +24,12 @@ function parseRequiredText(
     return { error: `${field} must be ${maxLength} chars or fewer` };
   }
   return { value: text };
+}
+
+function parseOptionalVideoType(value: unknown): YouTubeVideoType | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = normalizeYouTubeVideoType(value.trim());
+  return parsed === "unknown" ? null : parsed;
 }
 
 export async function GET() {
@@ -40,6 +50,7 @@ export async function GET() {
         thumbnail_url: item.thumbnail_url,
         video_url: item.video_url,
         published_at: item.published_at,
+        video_type: item.video_type,
         source: "manual" as const,
       })),
       ...recentVideos
@@ -53,6 +64,7 @@ export async function GET() {
           thumbnail_url: video.thumbnail_url,
           video_url: video.video_url,
           published_at: video.published_at,
+          video_type: video.video_type,
           source: "auto" as const,
         })),
     ];
@@ -69,24 +81,30 @@ export async function GET() {
     });
   } catch (err) {
     console.error("[/api/admin/manual-youtube-links][GET]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json().catch(() => null)) as
-      | {
-          videoUrl?: unknown;
-        }
-      | null;
+    const body = (await req.json().catch(() => null)) as {
+      videoUrl?: unknown;
+      videoType?: unknown;
+    } | null;
 
     const videoUrlResult = parseRequiredText(body?.videoUrl, "videoUrl", 500);
     if (videoUrlResult.error) {
-      return NextResponse.json({ error: videoUrlResult.error }, { status: 400 });
+      return NextResponse.json(
+        { error: videoUrlResult.error },
+        { status: 400 },
+      );
     }
 
     const resolved = await resolveManualYoutubeLink(videoUrlResult.value ?? "");
+    const requestedVideoType = parseOptionalVideoType(body?.videoType);
 
     const item = await upsertManualYoutubeLink({
       videoId: resolved.videoId,
@@ -94,12 +112,15 @@ export async function POST(req: NextRequest) {
       title: resolved.title,
       channelName: resolved.channelName,
       publishedAt: resolved.publishedAt,
+      videoType: requestedVideoType ?? resolved.videoType,
     });
 
     return NextResponse.json({ ok: true, item });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Internal server error";
-    const status = message.includes("required") || message.includes("등록된") ? 400 : 500;
+    const message =
+      err instanceof Error ? err.message : "Internal server error";
+    const status =
+      message.includes("required") || message.includes("등록된") ? 400 : 500;
     if (status === 500) {
       console.error("[/api/admin/manual-youtube-links][POST]", err);
     }

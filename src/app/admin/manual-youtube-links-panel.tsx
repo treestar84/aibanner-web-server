@@ -1,6 +1,12 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type SyntheticEvent,
+} from "react";
 
 interface ManualYoutubeLinkItem {
   id: number;
@@ -10,6 +16,7 @@ interface ManualYoutubeLinkItem {
   video_url: string;
   thumbnail_url: string;
   published_at: string;
+  video_type: "longform" | "shorts" | "unknown";
   created_at: string;
   updated_at: string;
 }
@@ -23,8 +30,11 @@ interface DisplayYoutubeItem {
   thumbnail_url: string;
   video_url: string;
   published_at: string;
+  video_type: "longform" | "shorts" | "unknown";
   source: "manual" | "auto";
 }
+
+type ManualYoutubeVideoType = "longform" | "shorts" | "unknown";
 
 function formatKst(iso: string): string {
   const date = new Date(iso);
@@ -53,6 +63,7 @@ export function ManualYoutubeLinksPanel() {
   const [items, setItems] = useState<ManualYoutubeLinkItem[]>([]);
   const [displayItems, setDisplayItems] = useState<DisplayYoutubeItem[]>([]);
   const [videoUrl, setVideoUrl] = useState("");
+  const [videoType, setVideoType] = useState<ManualYoutubeVideoType>("unknown");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -75,9 +86,13 @@ export function ManualYoutubeLinksPanel() {
         displayItems?: DisplayYoutubeItem[];
       };
       setItems(Array.isArray(data.items) ? data.items : []);
-      setDisplayItems(Array.isArray(data.displayItems) ? data.displayItems : []);
+      setDisplayItems(
+        Array.isArray(data.displayItems) ? data.displayItems : [],
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "목록 조회에 실패했습니다.");
+      setError(
+        err instanceof Error ? err.message : "목록 조회에 실패했습니다.",
+      );
       setItems([]);
       setDisplayItems([]);
     } finally {
@@ -97,22 +112,31 @@ export function ManualYoutubeLinksPanel() {
   }, [loadItems]);
 
   const countText = useMemo(() => `${items.length}개`, [items]);
-  const displayCountText = useMemo(() => `${displayItems.length}개`, [displayItems]);
+  const displayCountText = useMemo(
+    () => `${displayItems.length}개`,
+    [displayItems],
+  );
 
   function resetForm() {
     setEditingId(null);
     setVideoUrl("");
+    setVideoType("unknown");
   }
 
   function startEdit(item: ManualYoutubeLinkItem) {
     setEditingId(item.id);
     setVideoUrl(item.video_url);
+    setVideoType(item.video_type);
     setError(null);
     setNotice(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function saveManualLink(targetVideoUrl: string, targetId?: number | null) {
+  async function saveManualLink(
+    targetVideoUrl: string,
+    targetVideoType: ManualYoutubeVideoType,
+    targetId?: number | null,
+  ) {
     const normalizedUrl = targetVideoUrl.trim();
     if (!normalizedUrl) {
       setError("YouTube 링크를 입력해 주세요.");
@@ -134,6 +158,7 @@ export function ManualYoutubeLinksPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           videoUrl: normalizedUrl,
+          videoType: targetVideoType,
         }),
       });
       if (!res.ok) {
@@ -143,7 +168,7 @@ export function ManualYoutubeLinksPanel() {
       setNotice(
         isEditing
           ? "수동 유튜브 링크 수정 완료 · 제목/채널명은 자동 갱신되었습니다."
-          : "수동 유튜브 링크 등록 완료 · 링크 정보가 자동 채워졌습니다."
+          : "수동 유튜브 링크 등록 완료 · 링크 정보가 자동 채워졌습니다.",
       );
       if (isEditing && editingId === targetId) {
         resetForm();
@@ -160,11 +185,11 @@ export function ManualYoutubeLinksPanel() {
     }
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await saveManualLink(videoUrl, editingId);
+      await saveManualLink(videoUrl, videoType, editingId);
     } finally {
       setSubmitting(false);
     }
@@ -183,7 +208,9 @@ export function ManualYoutubeLinksPanel() {
       if (!res.ok) {
         throw new Error(await readErrorMessage(res));
       }
-      setNotice("수동 유튜브 링크 삭제 완료 · 앱 유튜브 탭 다음 새로고침에서 제외됩니다.");
+      setNotice(
+        "수동 유튜브 링크 삭제 완료 · 앱 유튜브 탭 다음 새로고침에서 제외됩니다.",
+      );
       if (editingId === item.id) {
         resetForm();
       }
@@ -197,7 +224,9 @@ export function ManualYoutubeLinksPanel() {
     <div className="mt-10 border-t border-zinc-800 pt-10">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-black tracking-tight">수동 유튜브 링크</h2>
+          <h2 className="text-2xl font-black tracking-tight">
+            수동 유튜브 링크
+          </h2>
           <p className="mt-2 text-sm text-zinc-400">
             링크만 입력하면 제목, 채널명, 게시시각은 자동으로 채웁니다.
           </p>
@@ -222,6 +251,20 @@ export function ManualYoutubeLinksPanel() {
             className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-400"
             maxLength={500}
           />
+          <label className="grid gap-1 text-xs font-semibold text-zinc-400">
+            영상 타입
+            <select
+              value={videoType}
+              onChange={(e) =>
+                setVideoType(e.target.value as ManualYoutubeVideoType)
+              }
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-400"
+            >
+              <option value="unknown">자동 판별</option>
+              <option value="longform">롱폼</option>
+              <option value="shorts">쇼츠</option>
+            </select>
+          </label>
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
@@ -251,8 +294,8 @@ export function ManualYoutubeLinksPanel() {
         </div>
 
         <p className="mt-2 text-xs text-zinc-500">
-          저장 시 같은 영상은 중복 생성하지 않고 기존 항목을 갱신합니다. 자동 수집 목록에 있는 영상이면
-          해당 메타데이터를 그대로 재사용합니다.
+          저장 시 같은 영상은 중복 생성하지 않고 기존 항목을 갱신합니다. 자동
+          수집 목록에 있는 영상이면 해당 메타데이터를 그대로 재사용합니다.
         </p>
       </form>
 
@@ -271,13 +314,18 @@ export function ManualYoutubeLinksPanel() {
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-bold text-zinc-100">현재 앱 반영 목록</h3>
+            <h3 className="text-lg font-bold text-zinc-100">
+              현재 앱 반영 목록
+            </h3>
             <p className="mt-1 text-xs text-zinc-500">
-              앱 유튜브 탭에 실제로 합쳐져 보이는 목록입니다. 수동 항목은 바로 수정/삭제할 수 있고,
-              자동 수집 항목은 필요할 때만 수동 관리로 전환하면 됩니다.
+              앱 유튜브 탭에 실제로 합쳐져 보이는 목록입니다. 수동 항목은 바로
+              수정/삭제할 수 있고, 자동 수집 항목은 필요할 때만 수동 관리로
+              전환하면 됩니다.
             </p>
           </div>
-          <span className="text-xs text-zinc-500">노출 기준 {displayCountText}</span>
+          <span className="text-xs text-zinc-500">
+            노출 기준 {displayCountText}
+          </span>
         </div>
 
         {loading ? (
@@ -337,7 +385,9 @@ export function ManualYoutubeLinksPanel() {
                         <button
                           type="button"
                           onClick={() => {
-                            const matched = items.find((candidate) => candidate.id === item.manual_id);
+                            const matched = items.find(
+                              (candidate) => candidate.id === item.manual_id,
+                            );
                             if (matched) startEdit(matched);
                           }}
                           className="rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-100"
@@ -347,7 +397,9 @@ export function ManualYoutubeLinksPanel() {
                         <button
                           type="button"
                           onClick={() => {
-                            const matched = items.find((candidate) => candidate.id === item.manual_id);
+                            const matched = items.find(
+                              (candidate) => candidate.id === item.manual_id,
+                            );
                             if (matched) void handleDelete(matched);
                           }}
                           className="rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-1.5 text-xs text-red-100"
@@ -359,10 +411,18 @@ export function ManualYoutubeLinksPanel() {
                       <button
                         type="button"
                         disabled={processingUrl === item.video_url}
-                        onClick={() => void saveManualLink(item.video_url, null)}
+                        onClick={() =>
+                          void saveManualLink(
+                            item.video_url,
+                            item.video_type,
+                            null,
+                          )
+                        }
                         className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {processingUrl === item.video_url ? "추가 중..." : "수동 관리로 전환"}
+                        {processingUrl === item.video_url
+                          ? "추가 중..."
+                          : "수동 관리로 전환"}
                       </button>
                     )}
                   </div>
@@ -375,7 +435,9 @@ export function ManualYoutubeLinksPanel() {
 
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h3 className="text-lg font-bold text-zinc-100">현재 수동 관리 목록</h3>
+          <h3 className="text-lg font-bold text-zinc-100">
+            현재 수동 관리 목록
+          </h3>
           <span className="text-xs text-zinc-500">수정/삭제 가능</span>
         </div>
 
@@ -449,7 +511,6 @@ export function ManualYoutubeLinksPanel() {
           </ul>
         )}
       </section>
-
     </div>
   );
 }

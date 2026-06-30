@@ -1,8 +1,10 @@
 import { load } from "cheerio";
 import { buildYoutubeChannelUrl } from "@/lib/youtube-recommend-channels";
+import { readLimitedResponseText } from "@/lib/youtube-fetch";
 
 const CHANNEL_ID_PATTERN = /^UC[A-Za-z0-9_-]{22}$/;
 const HANDLE_PATTERN = /^@[^/\s?#]+$/u;
+const CHANNEL_HTML_MAX_BYTES = 1024 * 1024;
 
 export interface ResolvedYoutubeChannel {
   channelId: string;
@@ -12,7 +14,24 @@ export interface ResolvedYoutubeChannel {
 }
 
 function normalizeHost(hostname: string): string {
-  return hostname.trim().toLowerCase().replace(/^www\./, "");
+  return hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
+}
+
+function isAllowedChannelPath(pathname: string): boolean {
+  const segments = pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+
+  if (segments.length === 0) return false;
+  if (segments.length > 2) return false;
+  if (segments[0]?.startsWith("@")) return HANDLE_PATTERN.test(segments[0]);
+  return (
+    segments[0] === "channel" && CHANNEL_ID_PATTERN.test(segments[1] ?? "")
+  );
 }
 
 function normalizeInputAsUrl(input: string): string {
@@ -32,15 +51,19 @@ function normalizeInputAsUrl(input: string): string {
   try {
     const url = new URL(trimmed);
     const host = normalizeHost(url.hostname);
-    if (host !== "youtube.com" && host !== "m.youtube.com" && host !== "youtu.be") {
+    if (url.protocol !== "https:") {
       throw new Error("유효한 YouTube 채널 링크를 입력해 주세요.");
     }
 
-    if (host === "youtu.be") {
-      throw new Error("영상 링크가 아니라 채널 링크를 입력해 주세요.");
+    if (host !== "youtube.com" && host !== "m.youtube.com") {
+      throw new Error("유효한 YouTube 채널 링크를 입력해 주세요.");
     }
 
-    return url.toString();
+    if (!isAllowedChannelPath(url.pathname)) {
+      throw new Error("유효한 YouTube 채널 링크를 입력해 주세요.");
+    }
+
+    return `https://www.youtube.com${url.pathname}`;
   } catch (err) {
     if (err instanceof Error) throw err;
     throw new Error("유효한 YouTube 채널 링크를 입력해 주세요.");
@@ -72,13 +95,20 @@ async function fetchChannelHtml(url: string): Promise<string> {
       "User-Agent": "Mozilla/5.0 (compatible; AI-Trend-Widget/1.0)",
     },
     cache: "no-store",
+    redirect: "manual",
+    signal: AbortSignal.timeout(6000),
   });
 
   if (!res.ok) {
     throw new Error("채널 정보를 가져오지 못했습니다.");
   }
 
-  return res.text();
+  const html = await readLimitedResponseText(res, CHANNEL_HTML_MAX_BYTES);
+  if (!html) {
+    throw new Error("채널 응답이 너무 큽니다.");
+  }
+
+  return html;
 }
 
 function extractFromHtml(html: string): {
@@ -116,7 +146,7 @@ function extractFromHtml(html: string): {
 }
 
 export async function resolveYoutubeChannel(
-  rawInput: string
+  rawInput: string,
 ): Promise<ResolvedYoutubeChannel> {
   const inputUrl = normalizeInputAsUrl(rawInput);
   const parsed = new URL(inputUrl);
@@ -128,7 +158,8 @@ export async function resolveYoutubeChannel(
 
   const channelId = extracted.channelId || channelIdFromPath;
   const channelHandle = extracted.channelHandle || handleFromPath;
-  const channelUrl = extracted.canonicalUrl || buildYoutubeChannelUrl(channelId, channelHandle);
+  const channelUrl =
+    extracted.canonicalUrl || buildYoutubeChannelUrl(channelId, channelHandle);
   const channelName = extracted.channelName;
 
   if (!channelId || !CHANNEL_ID_PATTERN.test(channelId)) {

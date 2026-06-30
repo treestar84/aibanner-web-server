@@ -122,7 +122,10 @@ async function fetchSubreddit(
         link: `https://www.reddit.com${post.data.permalink}`,
         publishedAt: new Date(post.data.created_utc * 1000),
         summary: (post.data.selftext ?? "").slice(0, 500),
-        sourceDomain: "reddit.com",
+        // 서브레딧별 가상 서브도메인: 여러 서브레딧에서 동시에 화제인 토픽이
+        // domains=1로 뭉개지지 않도록 분리 집계한다.
+        // `.reddit.com` suffix를 유지해 source_category 등의 suffix 매칭과 호환.
+        sourceDomain: `${subreddit.toLowerCase()}.reddit.com`,
         feedTitle: `r/${subreddit}`,
         tier: "COMMUNITY" as const,
         lang: "en",

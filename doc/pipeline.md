@@ -1,17 +1,18 @@
 # AI 트렌드 위젯 — 파이프라인 동작 문서
 
-> 최종 업데이트: 2026-04-20
+> 최종 업데이트: 2026-06-08
 > 관련 코드: `src/lib/pipeline/`
 
 ---
 
 ## 개요
 
-스냅샷 파이프라인은 하루 4회(KST 05:00 / 11:00 / 17:00 / 23:00) 자동 실행되며,
-AI 관련 RSS/API 소스를 수집해 트렌드 후보 Top20을 만들고 Top10 상세 데이터를 DB에 저장합니다.
+스냅샷 파이프라인은 하루 4회(KST 09:10 / 11:10 / 13:10 / 15:10) 자동 실행되며,
+AI 관련 RSS/API 소스를 수집해 트렌드 후보 Top20을 만들고 Top10 상세 데이터를 DB에 저장합니다. 같은 크론 안에서 YouTube 추천 영상 수집도 독립적으로 실행됩니다.
 
 ```
 RSS/API 수집 → 후보 추출 → AI 클러스터링 → 스코어링 → Tavily+Naver 검색 보강 → 요약 생성 → DB 저장
+YouTube 채널 RSS → 영상 metadata prefix 파싱 → longform/shorts 분류 → youtube_videos 저장
 ```
 
 실행 진입점: `src/app/api/cron/snapshot/route.ts`
@@ -48,6 +49,23 @@ RSS 피드를 4개 티어로 분류합니다. 별도 API/RSS 수집기(Product H
 ### 예상 수집량
 
 정상 동작 시 RSS와 API 수집기를 합쳐 수십~수백 개 아이템. 피드/API 가용성과 증분 윈도우에 따라 달라집니다.
+
+### YouTube 추천 영상 수집 (`youtube_recommend_source.ts`)
+
+키워드 랭킹용 `youtube_source.ts`와 별개로, 앱의 YouTube 메뉴와 홈 YouTube 스트립에 쓰는 추천 영상 테이블을 갱신합니다.
+
+- 채널 목록: `youtube_recommend_channels` DB 테이블에서 읽음. 관리자 `/admin`의 YouTube 수집 채널 탭에서 관리
+- 피드: `https://www.youtube.com/feeds/videos.xml?channel_id={channelId}`
+- 기본 수집 윈도우: 최근 72시간
+- 저장 필드: `video_id`, `channel_id`, `channel_name`, `title`, `thumbnail_url`, `video_url`, `published_at`, `duration_seconds`, `video_type`
+- 썸네일: `https://i.ytimg.com/vi/{videoId}/hqdefault.jpg`
+- 분류:
+  - URL path가 `/shorts/{id}`이면 `shorts`
+  - metadata에서 `lengthSeconds` 또는 `approxDurationMs`를 읽고 180초 이하이면 `shorts`
+  - 180초 초과이면 `longform`
+  - metadata 파싱 실패 시 `unknown`
+- oversized YouTube HTML은 전체를 읽지 않고 앞쪽 prefix만 읽어 metadata를 찾습니다. prefix 안에 duration이 있으면 분류하고, 없으면 안전하게 `unknown`으로 남깁니다.
+- 기존 `unknown` 행은 기본 `longform` 피드에 포함해 레거시 데이터가 홈/YouTube 기본 목록에서 사라지지 않게 합니다.
 
 ---
 
@@ -157,6 +175,31 @@ total = recency × 0.35
 | `authority` | 0.20 | 티어별 고정값: P0=1.0, P1=0.6, P2=0.3, COMMUNITY=0.2 |
 | `internal` | 0.10 | 이전 스냅샷 대비 순위 상승 시 보너스 |
 
+### 랭킹 품질 정책 (`ranking_quality_policy.ts`)
+
+실시간 랭킹은 기본 점수와 기존 policy/stability/manual 보정 이후, final slicing 전에 품질 reason을 계산합니다. 기본 운영값은 `PIPELINE_QUALITY_SHADOW_ONLY=1`이며 이 상태에서는 reason만 만들고 순위는 바꾸지 않습니다.
+
+품질 정책은 추가 OpenAI/Tavily/Naver 호출 없이 저장된 후보 점수와 수집된 source item만 사용합니다. 적용 가능한 reason code는 다음과 같습니다.
+
+| 영역 | reason 예시 | 의미 |
+|---|---|---|
+| freshness | `recent_source`, `structured_release`, `breakout_velocity`, `community_interest`, `reignition`, `stale_no_evidence` | 72시간 날짜 단일 조건이 아니라 최신 출처/구조화 릴리스/관심도/재점화 중 하나를 OR 증거로 평가 |
+| source | `missing_relevant_source` | 키워드 anchor와 출처 제목/본문/URL/domain 관련성이 낮음 |
+| generic | `generic_unanchored`, `generic_anchored`, `specific_context_protected` | `MCP server`, `AI coding agent`, `Vibe Coding` 같은 broad keyword를 맥락 기반으로 감점/보호 |
+| repeat | numeric delta reason | 2~3일 breakout은 유지하고, 3일 초과 stale evergreen은 감점하되 re-ignition은 감점 완화 |
+
+품질 감점 합계는 하한으로 bounded 처리해 자연 score를 압도하지 않습니다. 수동 키워드는 기존 manual lifecycle 외의 quality delta를 적용하지 않습니다.
+
+#### Rollout 순서
+
+1. `PIPELINE_QUALITY_SHADOW_ONLY=1`로 3일 이상 reason을 수집하고 정상 키워드 손상 여부를 확인합니다.
+2. `PIPELINE_SOURCE_QUALITY_ENABLED=1`을 먼저 켜서 무관 topSource 감점을 관찰합니다.
+3. `PIPELINE_GENERIC_CONTEXT_POLICY_ENABLED=1`을 켜서 무맥락 broad keyword 감점을 관찰합니다.
+4. `PIPELINE_REPEAT_EXPOSURE_POLICY_ENABLED=1`을 켜서 3일 초과 evergreen 억제를 관찰합니다.
+5. API Top20 노출 품질이 충분히 검증되면 `PIPELINE_TOP20_LIGHTWEIGHT_GUARD_ENABLED=1`을 켭니다.
+
+Rollback은 즉시 가능합니다. `PIPELINE_QUALITY_SHADOW_ONLY=1`로 되돌리고 `PIPELINE_SOURCE_QUALITY_ENABLED=0`, `PIPELINE_GENERIC_CONTEXT_POLICY_ENABLED=0`, `PIPELINE_REPEAT_EXPOSURE_POLICY_ENABLED=0`, `PIPELINE_TOP20_LIGHTWEIGHT_GUARD_ENABLED=0`을 배포하면 품질 정책은 reason 기록 또는 기존 노출 방식으로 돌아갑니다.
+
 ### 델타 랭크
 
 현재 스냅샷의 순위와 직전 스냅샷 순위 차이.
@@ -254,6 +297,9 @@ snapshots       : 스냅샷 메타 (ID, 업데이트 시각, 다음 업데이트
 keywords        : Top 10 키워드 + 점수 + 요약 + top source
 sources         : 키워드별 소스 카드 (news/social/data, 최대 8개/타입)
 keyword_aliases : canonical/ko/en alias 저장, 검색 join에 사용
+youtube_videos  : 추천 YouTube 영상(title/thumbnail/duration/type)
+manual_youtube_links : 관리자 수동 YouTube 큐레이션
+youtube_recommend_channels : 추천 영상 수집 대상 채널
 ```
 
 ### 스냅샷 ID 형식
@@ -272,6 +318,7 @@ keyword_aliases : canonical/ko/en alias 저장, 검색 join에 사용
 | Tavily Search | ~30~50회 | 키워드 10 × 카테고리 3(+broad, news 보충) |
 | Naver Search | 최대 30회 | 키워드 10 × news/blog/cafe, 자격 증명 있을 때만 |
 | OG 이미지 fetch | ~100회 | HTTP 요청, 비용 없음 |
+| YouTube metadata fetch | 최근 72시간 영상 수만큼 | title/thumbnail은 RSS, duration/type은 HTML prefix 파싱 |
 | **하루 합계** | gpt-4o-mini ~44회, Tavily ~120~200회, Naver 최대 ~120회 | 스냅샷 4회/일 |
 
 ---
@@ -291,7 +338,7 @@ curl -X GET http://localhost:3000/api/cron/snapshot \
 
 ```yaml
 schedule:
-  - cron: "0 2,8,14,20 * * *" # KST 05:00 / 11:00 / 17:00 / 23:00
+  - cron: "10 0,2,4,6 * * *" # KST 09:10 / 11:10 / 13:10 / 15:10
 ```
 
 프로덕션에는 `APP_URL`, `CRON_SECRET` GitHub secret이 필요합니다.

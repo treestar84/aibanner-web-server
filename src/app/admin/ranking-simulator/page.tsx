@@ -7,6 +7,7 @@ import {
   type RankingSimulatorWeights,
   type RankingSimulatorResult,
 } from "@/lib/admin/ranking_simulator";
+import { AdminNav } from "../admin-nav";
 
 interface Weights {
   w_recency: number;
@@ -207,20 +208,16 @@ export default function RankingSimulatorPage() {
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 px-4 py-8">
       <section className="max-w-7xl mx-auto">
-        {/* Header */}
-        <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <header className="mb-6">
+          <h1 className="text-2xl font-black tracking-tight mb-6">Vibenow 관리자</h1>
+          <AdminNav activeTab="ranking" />
+        </header>
+
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <div className="flex items-center gap-3 mb-2">
-              <a
-                href="/admin"
-                className="text-sm text-zinc-400 hover:text-zinc-200"
-              >
-                &larr; 관리자
-              </a>
-            </div>
-            <h1 className="text-2xl font-black tracking-tight">
+            <h2 className="text-xl font-bold tracking-tight">
               랭킹 시뮬레이터
-            </h1>
+            </h2>
             <p className="text-sm text-zinc-400 mt-1">
               가중치를 조절하여 키워드 랭킹 변화를 시뮬레이션합니다.
               내부 보정값은 고정 additive bonus로 처리되며, 아래 슬라이더는 기본 스코어만 조절합니다.
@@ -241,7 +238,7 @@ export default function RankingSimulatorPage() {
               ))}
             </select>
           )}
-        </header>
+        </div>
 
         {error && (
           <div className="mb-4 rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-2 text-sm text-red-100">

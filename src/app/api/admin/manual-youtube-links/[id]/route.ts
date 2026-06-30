@@ -5,6 +5,10 @@ import {
   updateManualYoutubeLink,
 } from "@/lib/db/queries";
 import { resolveManualYoutubeLink } from "@/lib/manual-youtube-resolver";
+import {
+  normalizeYouTubeVideoType,
+  type YouTubeVideoType,
+} from "@/lib/youtube-video-type";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -18,7 +22,7 @@ function parseId(raw: string): number | null {
 function parseRequiredText(
   value: unknown,
   field: string,
-  maxLength: number
+  maxLength: number,
 ): { value?: string; error?: string } {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text) return { error: `${field} is required` };
@@ -28,9 +32,15 @@ function parseRequiredText(
   return { value: text };
 }
 
+function parseOptionalVideoType(value: unknown): YouTubeVideoType | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = normalizeYouTubeVideoType(value.trim());
+  return parsed === "unknown" ? null : parsed;
+}
+
 export async function PATCH(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
     const params = await context.params;
@@ -39,18 +49,35 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid id" }, { status: 400 });
     }
 
-    const body = (await req.json().catch(() => null)) as
-      | {
-          videoUrl?: unknown;
-        }
-      | null;
+    const body = (await req.json().catch(() => null)) as {
+      videoUrl?: unknown;
+      videoType?: unknown;
+    } | null;
 
     const videoUrlResult = parseRequiredText(body?.videoUrl, "videoUrl", 500);
     if (videoUrlResult.error) {
-      return NextResponse.json({ error: videoUrlResult.error }, { status: 400 });
+      return NextResponse.json(
+        { error: videoUrlResult.error },
+        { status: 400 },
+      );
     }
 
-    const resolved = await resolveManualYoutubeLink(videoUrlResult.value ?? "");
+    const current = await getManualYoutubeLinkById(id);
+    if (!current) {
+      return NextResponse.json(
+        { error: "manual youtube link not found" },
+        { status: 404 },
+      );
+    }
+
+    const resolved = await resolveManualYoutubeLink(
+      videoUrlResult.value ?? "",
+      {
+        existingManualVideoId: current.video_id,
+        existingManualVideoType: current.video_type,
+      },
+    );
+    const requestedVideoType = parseOptionalVideoType(body?.videoType);
 
     const item = await updateManualYoutubeLink(id, {
       videoId: resolved.videoId,
@@ -58,15 +85,14 @@ export async function PATCH(
       title: resolved.title,
       channelName: resolved.channelName,
       publishedAt: resolved.publishedAt,
+      videoType: requestedVideoType ?? resolved.videoType,
     });
-    if (!item) {
-      return NextResponse.json({ error: "manual youtube link not found" }, { status: 404 });
-    }
-
     return NextResponse.json({ ok: true, item });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Internal server error";
-    const status = message.includes("required") || message.includes("등록된") ? 400 : 500;
+    const message =
+      err instanceof Error ? err.message : "Internal server error";
+    const status =
+      message.includes("required") || message.includes("등록된") ? 400 : 500;
     if (status === 500) {
       console.error("[/api/admin/manual-youtube-links/[id]][PATCH]", err);
     }
@@ -76,7 +102,7 @@ export async function PATCH(
 
 export async function DELETE(
   _req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
     const params = await context.params;
@@ -87,17 +113,26 @@ export async function DELETE(
 
     const current = await getManualYoutubeLinkById(id);
     if (!current) {
-      return NextResponse.json({ error: "manual youtube link not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "manual youtube link not found" },
+        { status: 404 },
+      );
     }
 
     const deleted = await deleteManualYoutubeLink(id);
     if (!deleted) {
-      return NextResponse.json({ error: "manual youtube link not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "manual youtube link not found" },
+        { status: 404 },
+      );
     }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[/api/admin/manual-youtube-links/[id]][DELETE]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }

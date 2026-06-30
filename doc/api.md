@@ -1,6 +1,6 @@
 # AI 트렌드 위젯 - API 데이터/사용 가이드
 
-> 최종 업데이트: 2026-04-20
+> 최종 업데이트: 2026-06-08
 > 관련 코드: `src/app/api/`
 
 ## 1. 빠른 사용 흐름
@@ -27,6 +27,7 @@
 - `GET /api/v1/meta`: `s-maxage=60`, `stale-while-revalidate=30`
 - `GET /api/v1/trends/top`: `s-maxage=120`, `stale-while-revalidate=60`
 - `GET /api/v1/keywords/{id}`: `s-maxage=900`, `stale-while-revalidate=300`
+- `GET /api/v1/youtube/recent`: `no-store`
 - `GET /api/v1/search`: 별도 캐시 헤더 없음
 
 ## 3. 엔드포인트 상세
@@ -42,7 +43,7 @@
   "latestSnapshotId": "20260227_2100_KST",
   "updatedAt": "2026-02-27T12:00:00.000Z",
   "nextUpdateAt": "2026-02-27T21:00:00.000Z",
-  "scheduleKst": ["05:00", "11:00", "17:00", "23:00"]
+  "scheduleKst": ["09:10", "11:10", "13:10", "15:10"]
 }
 ```
 
@@ -341,6 +342,60 @@ curl "http://localhost:3000/api/v1/search?q=claude%20code&limit=5&lang=ko"
 }
 ```
 
+### 3.5-1 `GET /api/v1/youtube/recent`
+
+AI/바이브코딩 YouTube 채널에서 수집한 최신 영상을 반환합니다. 수집기는 채널 RSS에서 제목/썸네일/URL/게시시각을 저장하고, 영상 HTML metadata prefix에서 `durationSeconds`를 파싱해 `longform`/`shorts`를 분류합니다.
+
+쿼리 파라미터:
+
+- `limit` (선택): 기본 `20`, 최대 `50`
+- `type` (선택): `longform`(기본), `shorts`, `all`
+
+필터 규칙:
+
+- `longform`: `videoType`이 `longform` 또는 기존 미분류 호환값 `unknown`인 영상
+- `shorts`: `videoType`이 `shorts`인 영상만
+- `all`: longform/shorts/unknown 전체
+
+요청 예시:
+
+```bash
+curl "http://localhost:3000/api/v1/youtube/recent?limit=20&type=longform"
+curl "http://localhost:3000/api/v1/youtube/recent?limit=20&type=shorts"
+curl "http://localhost:3000/api/v1/youtube/recent?limit=20&type=all"
+```
+
+응답 예시:
+
+```json
+{
+  "updatedAt": "2026-06-07T12:00:00.000Z",
+  "nextUpdateAt": "2026-06-07T15:10:00.000Z",
+  "type": "shorts",
+  "items": [
+    {
+      "videoId": "mcRL96sy7lA",
+      "channelName": "AI Channel",
+      "title": "메타·구글 광고를 AI가 알아서 돌린다?",
+      "thumbnailUrl": "https://i.ytimg.com/vi/mcRL96sy7lA/hqdefault.jpg",
+      "videoUrl": "https://www.youtube.com/watch?v=mcRL96sy7lA",
+      "publishedAt": "2026-06-07T03:20:00.000Z",
+      "viewCount": null,
+      "likeCount": null,
+      "durationSeconds": 52,
+      "videoType": "shorts",
+      "isManual": false
+    }
+  ]
+}
+```
+
+참고:
+
+- Flutter의 YouTube 화면은 `롱폼`, `쇼츠`, `전체` 모드를 모두 사용합니다.
+- Flutter 홈 화면의 YouTube 스트립은 홈 전용 controller로 항상 `type=longform`을 요청하고, 렌더링 단계에서도 `shorts` 항목을 제외합니다.
+- `durationSeconds`는 YouTube 페이지 파싱 실패 시 `null`일 수 있으며, 이 경우 자동 수집 영상은 `unknown`으로 남아 기본 longform 피드에 포함됩니다.
+
 ### 3.6 `GET/POST /api/cron/snapshot`
 
 스냅샷 파이프라인을 실행합니다. `POST`는 `GET`과 동일 동작입니다.
@@ -382,7 +437,10 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 동작:
 
 - `keyword_id`가 최신 스냅샷 기준 유효한 경우 `keyword_view_counts.view_count` 증가
+- 동일 IP + 동일 keyword 조합은 1시간 내 중복 집계 차단 (서버 인스턴스 내 메모리 기반)
 - 유효하지 않은 ID는 `404`
+
+> **참고**: Flutter 앱은 이 엔드포인트를 직접 호출하지 않고 `POST /api/v1/keywords/views` 배치 엔드포인트를 사용합니다.
 
 요청 예시:
 
@@ -393,16 +451,49 @@ curl -X POST "http://localhost:3000/api/v1/keywords/claude_code_2/view"
 응답 예시:
 
 ```json
-{
-  "ok": true,
-  "keywordId": "claude_code_2"
-}
+{ "ok": true, "keywordId": "claude_code_2" }
+```
+
+중복 요청 응답 (집계 생략):
+
+```json
+{ "ok": true, "keywordId": "claude_code_2", "skipped": true }
 ```
 
 에러:
 
 - `400`: `{ "error": "keyword id is required" }`
 - `404`: `{ "error": "Keyword not found" }`
+- `500`: `{ "error": "Internal server error" }`
+
+### 3.8 `POST /api/v1/keywords/views` _(신규 · 2026-06-06)_
+
+여러 키워드 조회수를 한 번에 집계합니다. Flutter 앱의 `ViewBatchQueue`가 사용합니다.
+
+동작:
+
+- `ids` 배열을 받아 각 `keyword_id`의 `view_count`를 일괄 증가
+- 중복 ID는 서버 측 Set으로 자동 제거
+- 최대 20개 처리 (초과분 무시)
+
+요청 예시:
+
+```bash
+curl -X POST "http://localhost:3000/api/v1/keywords/views" \
+  -H "Content-Type: application/json" \
+  -d '{"ids": ["claude_code_2", "gpt_5_1", "cursor_ai"]}'
+```
+
+응답 예시:
+
+```json
+{ "ok": true, "counted": 3 }
+```
+
+에러:
+
+- `400`: `{ "error": "ids must be a non-empty array" }`
+- `400`: `{ "error": "No valid ids provided" }`
 - `500`: `{ "error": "Internal server error" }`
 
 ## 4. 클라이언트 구현용 최소 타입 예시

@@ -8,6 +8,10 @@ import { normalizePrimaryType } from "@/lib/pipeline/source_category";
 import { buildSnsDeeplinks } from "@/lib/pipeline/sns_deeplinks";
 import { parsePipelineMode } from "@/lib/pipeline/mode";
 import { buildFreshness, cacheControlByMode } from "@/lib/api/freshness";
+import {
+  isTop20LightweightGuardEnabled,
+  selectTopTrendDisplayKeywords,
+} from "@/lib/api/top_trends_display_quality";
 import { filterActiveSnapshotKeywords } from "@/lib/manual-keywords";
 
 export const runtime = "nodejs";
@@ -36,10 +40,15 @@ export async function GET(req: NextRequest) {
       Math.max(limit * 4, 100)
     );
     const activeManualKeywordIds = await getActiveManualKeywordIds(snapshot.pipeline_mode);
-    const visibleKeywords = filterActiveSnapshotKeywords(
+    const activeKeywords = filterActiveSnapshotKeywords(
       keywords,
       activeManualKeywordIds
-    ).slice(0, limit);
+    );
+    const visibleKeywords = selectTopTrendDisplayKeywords(
+      activeKeywords,
+      limit,
+      isTop20LightweightGuardEnabled()
+    );
 
     return NextResponse.json(
       {

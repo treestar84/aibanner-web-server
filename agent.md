@@ -29,7 +29,7 @@
 - `src/lib/db/*`: Neon SQL 클라이언트, 쿼리, 스키마.
 - `src/config/keyword-exclusions.json`: exact 키워드 제외 목록.
 - `scripts/db/migrate.ts`: SQL 스키마 적용 스크립트.
-- `.github/workflows/cron_realtime.yml`: KST `05:00`, `11:00`, `17:00`, `23:00` 스냅샷 트리거.
+- `.github/workflows/cron_realtime.yml`: KST `09:10`, `11:10`, `13:10`, `15:10` 스냅샷 트리거.
 
 ## 4) 구현 갭/주의(현재 코드 기준)
 - `keyword_aliases` 테이블은 검색 join에 사용되며 스냅샷 처리 시 canonical/ko/en alias를 upsert함.

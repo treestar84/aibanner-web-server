@@ -38,7 +38,7 @@ test("Korean preferred sources outrank exact global matches", () => {
     title: "클로드 코드 업데이트",
     url: "https://news.naver.com/example",
     domain: "news.naver.com",
-    snippet: "국내 개발자들이 주목한 업데이트",
+    snippet: "국내 개발자들이 주목한 Claude Code 업데이트",
     imageUrl: null,
     publishedAt: null,
     type: "news",

@@ -7,7 +7,7 @@ export interface ScheduleSlot {
 
 const MINUTES_PER_DAY = 24 * 60;
 const KST_OFFSET_MINUTES = 9 * 60;
-const DEFAULT_SCHEDULE_UTC = "2:0,8:0,14:0,20:0";
+const DEFAULT_SCHEDULE_UTC = "0:10,2:10,4:10,6:10";
 
 export function defaultScheduleUtcForMode(_mode?: PipelineMode): string {
   return DEFAULT_SCHEDULE_UTC;

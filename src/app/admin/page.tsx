@@ -1,14 +1,23 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type SyntheticEvent,
+} from "react";
 import { YoutubeSourceChannelsPanel } from "./youtube-source-channels-panel";
+import { ManualYoutubeLinksPanel } from "./manual-youtube-links-panel";
 import { PromoContentsPanel } from "./promo-contents-panel";
+import { AdminNav, type AdminTab } from "./admin-nav";
 import {
   buildManualKeywordFeedback,
   type ManualKeywordFeedback,
   type ManualKeywordOnDemandSnapshot,
 } from "@/lib/manual-keyword-feedback";
 
+type PageTab = Exclude<AdminTab, "ranking">;
 type PipelineMode = "realtime";
 
 interface ManualKeywordItem {
@@ -71,7 +80,8 @@ function statusText(item: ManualKeywordItem): string {
 
 function statusClass(item: ManualKeywordItem): string {
   if (!item.enabled) return "bg-zinc-700/70 text-zinc-200 border-zinc-500/70";
-  if (item.is_active) return "bg-emerald-500/15 text-emerald-200 border-emerald-400/60";
+  if (item.is_active)
+    return "bg-emerald-500/15 text-emerald-200 border-emerald-400/60";
   return "bg-amber-500/15 text-amber-200 border-amber-300/60";
 }
 
@@ -86,6 +96,8 @@ async function readErrorMessage(res: Response): Promise<string> {
 }
 
 export default function AdminPage() {
+  const [activeTab, setActiveTab] = useState<PageTab>("keywords");
+
   const [items, setItems] = useState<ManualKeywordItem[]>([]);
   const [modeFilter, setModeFilter] = useState<"all" | PipelineMode>("all");
   const [keyword, setKeyword] = useState("");
@@ -110,7 +122,9 @@ export default function AdminPage() {
       const data = (await res.json()) as { items?: ManualKeywordItem[] };
       setItems(Array.isArray(data.items) ? data.items : []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "목록 조회에 실패했습니다.");
+      setError(
+        err instanceof Error ? err.message : "목록 조회에 실패했습니다.",
+      );
       setItems([]);
     } finally {
       setLoading(false);
@@ -123,10 +137,10 @@ export default function AdminPage() {
 
   const activeCount = useMemo(
     () => items.filter((item) => item.enabled && item.is_active).length,
-    [items]
+    [items],
   );
 
-  async function handleCreate(e: FormEvent<HTMLFormElement>) {
+  async function handleCreate(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!keyword.trim()) {
       setError("키워드를 입력해 주세요.");
@@ -156,7 +170,7 @@ export default function AdminPage() {
           action: "create",
           item: payload.item,
           snapshot: payload.onDemandSnapshot,
-        })
+        }),
       );
 
       await loadItems();
@@ -170,7 +184,7 @@ export default function AdminPage() {
   async function runAction(
     item: ManualKeywordItem,
     action: "extend" | "enable" | "disable",
-    extendTtl?: number
+    extendTtl?: number,
   ) {
     setError(null);
     setNotice(null);
@@ -194,7 +208,7 @@ export default function AdminPage() {
           item: payload.item,
           ttlHours: extendTtl,
           snapshot: payload.onDemandSnapshot,
-        })
+        }),
       );
       await loadItems();
     } catch (err) {
@@ -221,7 +235,7 @@ export default function AdminPage() {
           action: "delete",
           deletedKeyword: item.keyword,
           snapshot: payload.onDemandSnapshot,
-        })
+        }),
       );
       await loadItems();
     } catch (err) {
@@ -232,208 +246,223 @@ export default function AdminPage() {
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 px-4 py-8">
       <section className="max-w-5xl mx-auto">
-        <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-black tracking-tight">관리자 · 수동 큐레이션</h1>
-            <p className="text-sm text-zinc-400 mt-2">
-              등록된 수동 키워드는 파이프라인에서 강제 포함되어 상단 노출 우선순위를 갖습니다.
-            </p>
-            <p className="text-sm text-zinc-500 mt-1">
-              아래에서 유튜브 추천 수집에 사용하는 채널 목록도 함께 관리할 수 있습니다.
-            </p>
-            <a
-              href="/admin/ranking-simulator"
-              className="inline-block mt-2 text-sm text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
-            >
-              랭킹 시뮬레이터 &rarr;
-            </a>
-          </div>
-          <div className="text-sm text-zinc-300 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2">
-            활성 {activeCount}개 / 전체 {items.length}개
-          </div>
+        <header className="mb-6">
+          <h1 className="text-2xl font-black tracking-tight">Vibenow 관리자</h1>
         </header>
 
-        <form
-          onSubmit={handleCreate}
-          className="rounded-xl border border-zinc-700 bg-zinc-900/70 p-4 mb-6"
-        >
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-3">
-            <input
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              placeholder="수동 키워드 입력 (예: Gemini 3.0)"
-              className="w-full rounded-lg bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-400"
-              maxLength={120}
-            />
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as PipelineMode)}
-              className="rounded-lg bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-400"
+        <AdminNav
+          activeTab={activeTab}
+          onTabChange={(tab) => setActiveTab(tab)}
+        />
+
+        {/* ── 수동 키워드 설정 ── */}
+        {activeTab === "keywords" && (
+          <>
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm text-zinc-400">
+                  등록된 수동 키워드는 파이프라인에서 강제 포함되어 상단 노출
+                  우선순위를 갖습니다.
+                </p>
+              </div>
+              <div className="text-sm text-zinc-300 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2">
+                활성 {activeCount}개 / 전체 {items.length}개
+              </div>
+            </div>
+
+            <form
+              onSubmit={handleCreate}
+              className="rounded-xl border border-zinc-700 bg-zinc-900/70 p-4 mb-6"
             >
-              <option value="realtime">realtime</option>
-            </select>
-            <select
-              value={ttlHours}
-              onChange={(e) => setTtlHours(Number.parseInt(e.target.value, 10))}
-              className="rounded-lg bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-400"
-            >
-              {TTL_OPTIONS.map((hour) => (
-                <option key={hour} value={hour}>
-                  {hour}시간 유지
-                </option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="rounded-lg bg-emerald-500 text-zinc-900 px-4 py-2 text-sm font-bold disabled:opacity-60"
-            >
-              {submitting ? "등록 중..." : "키워드 등록"}
-            </button>
-          </div>
-          <p className="text-xs text-zinc-500 mt-2">
-            동일 모드에서 같은 키워드를 다시 등록하면 중복 생성 대신 만료 시간이 갱신되며,
-            등록 직후 해당 모드 스냅샷이 즉시 실행됩니다.
-          </p>
-          <p className="text-xs text-zinc-500 mt-1">
-            연장 버튼은 지금 시점이 아니라 현재 만료 시각 뒤로 누적되며, 이미 만료된 항목만 새 TTL 창으로 다시 시작합니다.
-          </p>
-        </form>
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-3">
+                <input
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
+                  placeholder="수동 키워드 입력 (예: Gemini 3.0)"
+                  className="w-full rounded-lg bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-400"
+                  maxLength={120}
+                />
+                <select
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value as PipelineMode)}
+                  className="rounded-lg bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-400"
+                >
+                  <option value="realtime">realtime</option>
+                </select>
+                <select
+                  value={ttlHours}
+                  onChange={(e) =>
+                    setTtlHours(Number.parseInt(e.target.value, 10))
+                  }
+                  className="rounded-lg bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-400"
+                >
+                  {TTL_OPTIONS.map((hour) => (
+                    <option key={hour} value={hour}>
+                      {hour}시간 유지
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="rounded-lg bg-emerald-500 text-zinc-900 px-4 py-2 text-sm font-bold disabled:opacity-60"
+                >
+                  {submitting ? "등록 중..." : "키워드 등록"}
+                </button>
+              </div>
+              <p className="text-xs text-zinc-500 mt-2">
+                동일 모드에서 같은 키워드를 다시 등록하면 중복 생성 대신 만료
+                시간이 갱신되며, 등록 직후 해당 모드 스냅샷이 즉시 실행됩니다.
+              </p>
+              <p className="text-xs text-zinc-500 mt-1">
+                연장 버튼은 지금 시점이 아니라 현재 만료 시각 뒤로 누적되며,
+                이미 만료된 항목만 새 TTL 창으로 다시 시작합니다.
+              </p>
+            </form>
 
-        <div className="mb-3 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setModeFilter("all")}
-            className={`rounded-lg px-3 py-1.5 text-sm border ${
-              modeFilter === "all"
-                ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-100"
-                : "bg-zinc-900 border-zinc-700 text-zinc-300"
-            }`}
-          >
-            전체
-          </button>
-          <button
-            type="button"
-            onClick={() => setModeFilter("realtime")}
-            className={`rounded-lg px-3 py-1.5 text-sm border ${
-              modeFilter === "realtime"
-                ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-100"
-                : "bg-zinc-900 border-zinc-700 text-zinc-300"
-            }`}
-          >
-            realtime
-          </button>
-          <button
-            type="button"
-            onClick={() => loadItems()}
-            className="rounded-lg px-3 py-1.5 text-sm border bg-zinc-900 border-zinc-700 text-zinc-300"
-          >
-            새로고침
-          </button>
-        </div>
-
-        {error && (
-          <div className="mb-3 rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-2 text-sm text-red-100">
-            {error}
-          </div>
-        )}
-
-        {notice && (
-          <div
-            className={`mb-3 rounded-lg px-3 py-2 text-sm font-semibold ${
-              notice.tone === "warning"
-                ? "border border-amber-300/60 bg-amber-500/10 text-amber-100"
-                : "border border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
-            }`}
-          >
-            {notice.message}
-          </div>
-        )}
-
-        {loading ? (
-          <div className="rounded-xl border border-zinc-700 bg-zinc-900/60 p-8 text-center text-zinc-400">
-            불러오는 중...
-          </div>
-        ) : items.length === 0 ? (
-          <div className="rounded-xl border border-zinc-700 bg-zinc-900/60 p-8 text-center text-zinc-400">
-            등록된 수동 키워드가 없습니다.
-          </div>
-        ) : (
-          <ul className="space-y-3">
-            {items.map((item) => (
-              <li
-                key={item.id}
-                className="rounded-xl border border-zinc-700 bg-zinc-900/70 p-4"
+            <div className="mb-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setModeFilter("all")}
+                className={`rounded-lg px-3 py-1.5 text-sm border ${
+                  modeFilter === "all"
+                    ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-100"
+                    : "bg-zinc-900 border-zinc-700 text-zinc-300"
+                }`}
               >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className="text-lg font-bold leading-tight break-all">
-                        {item.keyword}
-                      </span>
-                      <span className="text-xs rounded-md px-2 py-0.5 border border-zinc-600 text-zinc-300">
-                        {item.mode}
-                      </span>
-                      <span
-                        className={`text-xs rounded-md px-2 py-0.5 border ${statusClass(item)}`}
-                      >
-                        {statusText(item)}
-                      </span>
+                전체
+              </button>
+              <button
+                type="button"
+                onClick={() => setModeFilter("realtime")}
+                className={`rounded-lg px-3 py-1.5 text-sm border ${
+                  modeFilter === "realtime"
+                    ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-100"
+                    : "bg-zinc-900 border-zinc-700 text-zinc-300"
+                }`}
+              >
+                realtime
+              </button>
+              <button
+                type="button"
+                onClick={() => loadItems()}
+                className="rounded-lg px-3 py-1.5 text-sm border bg-zinc-900 border-zinc-700 text-zinc-300"
+              >
+                새로고침
+              </button>
+            </div>
+
+            {error && (
+              <div className="mb-3 rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+                {error}
+              </div>
+            )}
+
+            {notice && (
+              <div
+                className={`mb-3 rounded-lg px-3 py-2 text-sm font-semibold ${
+                  notice.tone === "warning"
+                    ? "border border-amber-300/60 bg-amber-500/10 text-amber-100"
+                    : "border border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
+                }`}
+              >
+                {notice.message}
+              </div>
+            )}
+
+            {loading ? (
+              <div className="rounded-xl border border-zinc-700 bg-zinc-900/60 p-8 text-center text-zinc-400">
+                불러오는 중...
+              </div>
+            ) : items.length === 0 ? (
+              <div className="rounded-xl border border-zinc-700 bg-zinc-900/60 p-8 text-center text-zinc-400">
+                등록된 수동 키워드가 없습니다.
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {items.map((item) => (
+                  <li
+                    key={item.id}
+                    className="rounded-xl border border-zinc-700 bg-zinc-900/70 p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <span className="text-lg font-bold leading-tight break-all">
+                            {item.keyword}
+                          </span>
+                          <span className="text-xs rounded-md px-2 py-0.5 border border-zinc-600 text-zinc-300">
+                            {item.mode}
+                          </span>
+                          <span
+                            className={`text-xs rounded-md px-2 py-0.5 border ${statusClass(item)}`}
+                          >
+                            {statusText(item)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-400">
+                          남은 시간: {formatRemaining(item.remaining_seconds)} ·
+                          만료(KST): {formatKst(item.expires_at)}
+                        </p>
+                        <p className="text-xs text-zinc-500 mt-1">
+                          등록(KST): {formatKst(item.created_at)} · 마지막
+                          수정(KST): {formatKst(item.updated_at)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {TTL_OPTIONS.map((hour) => (
+                          <button
+                            key={hour}
+                            type="button"
+                            onClick={() => runAction(item, "extend", hour)}
+                            className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-100"
+                          >
+                            +{hour}시간 연장
+                          </button>
+                        ))}
+                        {item.enabled ? (
+                          <button
+                            type="button"
+                            onClick={() => runAction(item, "disable")}
+                            className="rounded-lg border border-zinc-500/70 bg-zinc-700/30 px-3 py-1.5 text-xs text-zinc-200"
+                          >
+                            비활성화
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => runAction(item, "enable")}
+                            className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-100"
+                          >
+                            재활성화
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => runDelete(item)}
+                          className="rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-1.5 text-xs text-red-100"
+                        >
+                          삭제
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-xs text-zinc-400">
-                      남은 시간: {formatRemaining(item.remaining_seconds)} · 만료(KST):{" "}
-                      {formatKst(item.expires_at)}
-                    </p>
-                    <p className="text-xs text-zinc-500 mt-1">
-                      등록(KST): {formatKst(item.created_at)} · 마지막 수정(KST):{" "}
-                      {formatKst(item.updated_at)}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {TTL_OPTIONS.map((hour) => (
-                      <button
-                        key={hour}
-                        type="button"
-                        onClick={() => runAction(item, "extend", hour)}
-                        className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-100"
-                      >
-                        +{hour}시간 연장
-                      </button>
-                    ))}
-                    {item.enabled ? (
-                      <button
-                        type="button"
-                        onClick={() => runAction(item, "disable")}
-                        className="rounded-lg border border-zinc-500/70 bg-zinc-700/30 px-3 py-1.5 text-xs text-zinc-200"
-                      >
-                        비활성화
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => runAction(item, "enable")}
-                        className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-100"
-                      >
-                        재활성화
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => runDelete(item)}
-                      className="rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-1.5 text-xs text-red-100"
-                    >
-                      삭제
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
 
-        <YoutubeSourceChannelsPanel />
+        {/* ── 유튜브 수집 채널 ── */}
+        {activeTab === "youtube" && (
+          <div className="space-y-8">
+            <ManualYoutubeLinksPanel />
+            <YoutubeSourceChannelsPanel />
+          </div>
+        )}
 
-        <PromoContentsPanel />
+        {/* ── 프로모션 관리 ── */}
+        {activeTab === "promo" && <PromoContentsPanel />}
       </section>
     </main>
   );
