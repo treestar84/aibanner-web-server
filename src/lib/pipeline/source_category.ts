@@ -1,3 +1,5 @@
+import { evaluateSourceQuality } from "@/lib/pipeline/source_quality";
+
 export type PrimaryType = "news" | "social" | "data";
 
 type SourceLike = {
@@ -5,6 +7,8 @@ type SourceLike = {
   domain?: string | null;
   url?: string | null;
   title?: string | null;
+  snippet?: string | null;
+  provider?: "tavily" | "naver";
 };
 
 const SOCIAL_DOMAINS = new Set([
@@ -222,12 +226,39 @@ function pickBestCategory(
 
 export function pickPrimarySource<T extends SourceLike>(
   sources: T[],
-  primaryType: PrimaryType
+  primaryType: PrimaryType,
+  keyword?: string
 ): T | undefined {
-  return (
-    sources.find((source) => classifySourceCategory(source) === primaryType) ??
-    sources[0]
-  );
+  const candidates = sources.filter((source) => classifySourceCategory(source) === primaryType);
+  const scopedSources = candidates.length > 0 ? candidates : sources;
+  if (!keyword) {
+    return scopedSources[0];
+  }
+  return pickHighestQualitySource(scopedSources, keyword) ?? scopedSources[0];
+}
+
+function pickHighestQualitySource<T extends SourceLike>(
+  sources: readonly T[],
+  keyword: string
+): T | undefined {
+  let bestSource: T | undefined;
+  let bestScore = -1;
+  for (const source of sources) {
+    const quality = evaluateSourceQuality({
+      keyword,
+      title: source.title ?? "",
+      snippet: source.snippet ?? "",
+      url: source.url ?? "",
+      domain: source.domain ?? null,
+      provider: source.provider,
+      category: classifySourceCategory(source),
+    });
+    if (quality.relevanceScore > bestScore) {
+      bestSource = source;
+      bestScore = quality.relevanceScore;
+    }
+  }
+  return bestSource;
 }
 
 export function normalizePrimaryType(
