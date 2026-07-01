@@ -16,6 +16,7 @@ import type {
   YouTubeVideoType,
 } from "@/lib/youtube-video-type";
 import type { PipelineMode } from "@/lib/pipeline/mode";
+import { buildAliasLookupKeys } from "@/lib/pipeline/keyword_identity";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1110,10 +1111,6 @@ export async function insertKeyword(
   `;
 }
 
-function normalizeAlias(alias: string): string {
-  return alias.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
-}
-
 function detectAliasLang(alias: string): "ko" | "en" {
   if (/[\uAC00-\uD7AF\u3130-\u318F\u1100-\u11FF]/.test(alias)) return "ko";
   return "en";
@@ -1127,8 +1124,8 @@ export async function upsertKeywordAliases(
   if (!normalizedCanonicalId) return;
 
   const dedupedAliases = [
-    ...new Set(aliases.map(normalizeAlias).filter((alias) => alias.length > 0)),
-  ].slice(0, 30);
+    ...new Set(aliases.flatMap((alias) => buildAliasLookupKeys(alias))),
+  ].slice(0, 60);
   if (dedupedAliases.length === 0) return;
 
   await Promise.all(
@@ -1149,6 +1146,32 @@ export async function upsertKeywordAliases(
       `,
     ),
   );
+}
+
+/**
+ * Looks up existing canonical_keyword_id for any of today's alias-lookup keys.
+ * Used pre-ranking (snapshot.ts) so recurring keywords keep the same keywordId
+ * across days even when the LLM's surface-text extraction varies slightly.
+ * When an alias key was historically attached to more than one canonical id,
+ * the most recently created mapping wins (deterministic, no crash).
+ */
+export async function getCanonicalKeywordIdsByAliases(
+  aliasKeys: string[],
+): Promise<Map<string, string>> {
+  if (aliasKeys.length === 0) return new Map();
+
+  const rows = (await sql`
+    SELECT DISTINCT ON (alias) alias, canonical_keyword_id
+    FROM keyword_aliases
+    WHERE alias = ANY(${aliasKeys})
+    ORDER BY alias, created_at DESC
+  `) as { alias: string; canonical_keyword_id: string }[];
+
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    map.set(row.alias, row.canonical_keyword_id);
+  }
+  return map;
 }
 
 export async function getPreviousRanks(
