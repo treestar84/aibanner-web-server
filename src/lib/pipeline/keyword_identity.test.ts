@@ -109,6 +109,25 @@ test("resolveCanonicalKeywordIds never assigns the same canonical ID to two diff
   assert.equal(new Set(ids).size, 2, "each resolved keyword must keep a distinct id");
 });
 
+test("resolveCanonicalKeywordIds does not let a remap steal another same-run keyword's own slug ID", () => {
+  // K1's alias resolves (via history) to "mcp_server" — which is exactly K2's own
+  // fresh slug ID (K2 itself has no alias match, so it would otherwise fall through
+  // and keep "mcp_server" as its own keywordId). Without reserving own IDs up front,
+  // K1 could steal "mcp_server" from K2, leaving both with the same keywordId.
+  const keywords = [
+    makeKeyword({ keywordId: "kw_abc123", keyword: "MCP 서버" }),
+    makeKeyword({ keywordId: "mcp_server", keyword: "MCP Server" }),
+  ];
+  const aliasMap = new Map([["mcp서버", "mcp_server"]]);
+
+  const { resolved } = resolveCanonicalKeywordIds(keywords, aliasMap);
+
+  const ids = resolved.map((k) => k.keywordId);
+  assert.equal(new Set(ids).size, 2, "each resolved keyword must keep a distinct id");
+  assert.equal(resolved[1].keywordId, "mcp_server", "K2 keeps its own slug ID");
+  assert.equal(resolved[0].keywordId, "kw_abc123", "K1 cannot steal K2's own slug ID");
+});
+
 test("resolveCanonicalKeywordIds preserves all other NormalizedKeyword fields", () => {
   const original = makeKeyword({ keywordId: "kw_x", keyword: "Gemini CLI", aliases: ["제미나이 CLI"] });
   const aliasMap = new Map([["gemini cli", "kw_history_gemini_cli"]]);

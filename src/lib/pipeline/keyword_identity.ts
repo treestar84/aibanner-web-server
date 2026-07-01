@@ -45,6 +45,7 @@ export function resolveCanonicalKeywordIds(
   keywords: readonly NormalizedKeyword[],
   aliasCanonicalMap: ReadonlyMap<string, string>
 ): CanonicalResolutionResult {
+  const ownKeywordIds = new Set(keywords.map((keyword) => keyword.keywordId));
   const usedCanonicalIds = new Set<string>();
   let remappedCount = 0;
 
@@ -57,13 +58,17 @@ export function resolveCanonicalKeywordIds(
     let canonicalId: string | undefined;
     for (const key of lookupKeys) {
       const candidate = aliasCanonicalMap.get(key);
-      if (candidate && !usedCanonicalIds.has(candidate)) {
+      if (
+        candidate &&
+        !usedCanonicalIds.has(candidate) &&
+        !ownKeywordIds.has(candidate)
+      ) {
         canonicalId = candidate;
         break;
       }
     }
 
-    if (!canonicalId || canonicalId === keyword.keywordId) {
+    if (!canonicalId) {
       usedCanonicalIds.add(keyword.keywordId);
       return keyword;
     }
