@@ -52,3 +52,4 @@ scripts/_*.ts
 
 # gstack 보안 점검 리포트 (로컬 전용)
 .gstack/
+.worktrees/
