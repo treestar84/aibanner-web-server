@@ -16,6 +16,7 @@ import { collectVendorAnnouncementItems } from "./vendor_announcements_source";
 import { collectBlueskyItems } from "./bluesky_source";
 import type { RssItem } from "./rss";
 import { normalizeKeywords } from "./keywords";
+import { collectAliasLookupKeys, resolveCanonicalKeywordIds } from "./keyword_identity";
 import { rankKeywords } from "./scoring";
 import type { ScoringProfile } from "./scoring";
 import type { PipelineMode } from "./mode";
@@ -62,6 +63,7 @@ import {
   getActiveManualKeywords,
   insertSnapshotCandidates,
   getRankingWeights,
+  getCanonicalKeywordIdsByAliases,
 } from "@/lib/db/queries";
 import type { Source, SourceIngestionState } from "@/lib/db/queries";
 const RANKING_CANDIDATE_LIMIT = 20;
@@ -868,8 +870,21 @@ export async function runSnapshotPipeline(
 
   // 2~3) 키워드 추출 + 정규화 (AI 클러스터링)
   console.log("[snapshot] Step 2-3: Normalizing keywords...");
-  const normalizedKeywords = await normalizeKeywords(allItems, { mode });
-  console.log(`[snapshot] Got ${normalizedKeywords.length} normalized keywords`);
+  const extractedKeywords = await normalizeKeywords(allItems, { mode });
+  console.log(`[snapshot] Got ${extractedKeywords.length} normalized keywords`);
+
+  // 2-4) canonical ID 재해석: 과거 스냅샷의 keyword_aliases와 매칭되면 그 canonical ID를
+  // 재사용해, appearances 기반 evergreen 패널티(repeat_exposure_policy.ts)가 표면 텍스트
+  // 변형(띄어쓰기/표기 차이)에 의해 리셋되지 않도록 한다.
+  const aliasLookupKeys = collectAliasLookupKeys(extractedKeywords);
+  const aliasCanonicalMap = await getCanonicalKeywordIdsByAliases(aliasLookupKeys);
+  const { resolved: normalizedKeywords, remappedCount } = resolveCanonicalKeywordIds(
+    extractedKeywords,
+    aliasCanonicalMap
+  );
+  console.log(
+    `[snapshot] Canonical ID resolution: ${remappedCount}/${extractedKeywords.length} keywords remapped to existing canonical IDs`
+  );
   const activeManualKeywords = await getActiveManualKeywords(mode);
   const activeManualKeywordKeySet = new Set<string>(
     activeManualKeywords.map((row) => normalizeManualKeywordLookupKey(row.keyword))
