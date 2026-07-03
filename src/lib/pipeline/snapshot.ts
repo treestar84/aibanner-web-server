@@ -21,6 +21,7 @@ import { rankKeywords } from "./scoring";
 import type { ScoringProfile } from "./scoring";
 import type { PipelineMode } from "./mode";
 import { collectSources } from "./tavily";
+import { buildEventContext } from "./event_context";
 import { generateSummaries, batchTranslateTitles, classifyKeywordType, naturalizeKeywordKo } from "./summarize";
 import { batchExtractOgImages } from "./og-parser";
 import { determinePrimaryType, pickPrimarySource } from "./source_category";
@@ -672,7 +673,8 @@ async function processKeyword(
 
   // ── 신규: Tavily 수집 ────────────────────────────────────────────
   console.log(`[snapshot] [NEW]   ${kw.keyword} (rank ${item.rank})`);
-  const sourcesMap = await collectSources(kw.keyword);
+  const eventContext = buildEventContext(kw, allSourceItems);
+  const sourcesMap = await collectSources(kw.keyword, eventContext);
   const allSources = [
     ...sourcesMap.news,
     ...sourcesMap.social,
@@ -687,14 +689,10 @@ async function processKeyword(
     }
   }
 
-  // RSS 원본 기사에서 컨텍스트 추출 (matchedItems 인덱스 활용)
-  const rssContext: Array<{ title: string; snippet: string }> = [];
-  for (const idx of kw.candidates.matchedItems) {
-    const rssItem = allSourceItems[idx];
-    if (!rssItem) continue;
-    rssContext.push({ title: rssItem.title, snippet: rssItem.summary || "" });
-    if (rssContext.length >= 5) break;
-  }
+  // RSS 원본 기사에서 컨텍스트 추출 (이벤트 컨텍스트 재사용)
+  const rssContext: Array<{ title: string; snippet: string }> = eventContext.articles.map(
+    (article) => ({ title: article.title, snippet: article.snippet })
+  );
 
   const summaries = await generateSummaries(
     kw.keyword,

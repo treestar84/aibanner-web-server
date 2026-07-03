@@ -8,7 +8,7 @@ type SourceLike = {
   url?: string | null;
   title?: string | null;
   snippet?: string | null;
-  provider?: "tavily" | "naver";
+  provider?: "tavily" | "naver" | "origin";
 };
 
 const SOCIAL_DOMAINS = new Set([

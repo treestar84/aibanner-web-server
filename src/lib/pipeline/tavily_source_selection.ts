@@ -49,6 +49,8 @@ export function filterRelevantSources(
   );
 }
 
+const RECENT_SOURCE_WINDOW_MS = 72 * 60 * 60 * 1000;
+
 export function scoreSourcePriority(source: TavilySource, keyword: string): number {
   const quality = evaluateSourceQuality({
     keyword,
@@ -68,8 +70,21 @@ export function scoreSourcePriority(source: TavilySource, keyword: string): numb
   if (quality.relevanceScore >= SOURCE_RELEVANCE_THRESHOLD && source.provider === "naver") {
     priorityScore += 0.2;
   }
+  if (source.provider === "origin") {
+    priorityScore += 2.0;
+  }
+  if (isWithinRecentWindow(source.publishedAt)) {
+    priorityScore += 0.3;
+  }
 
   return priorityScore;
+}
+
+function isWithinRecentWindow(publishedAt: string | null | undefined): boolean {
+  if (!publishedAt) return false;
+  const timestamp = Date.parse(publishedAt);
+  if (Number.isNaN(timestamp)) return false;
+  return Date.now() - timestamp <= RECENT_SOURCE_WINDOW_MS;
 }
 
 export function isKoreanPreferredSource(

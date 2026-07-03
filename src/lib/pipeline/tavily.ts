@@ -15,6 +15,9 @@ import {
 } from "./tavily_source_selection";
 export { isKoreanPreferredSource } from "./tavily_source_selection";
 export { scoreSourcePriority } from "./tavily_source_selection";
+import { toOriginSources, type EventContext } from "./event_context";
+import { buildSearchQueryPlanViaLlm } from "./search_query_plan";
+import { filterByEventRelevance } from "./event_relevance_gate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,7 +31,7 @@ export interface TavilySource {
   imageUrl: string | null;
   publishedAt: string | null;
   type: SourceType;
-  provider?: "tavily" | "naver";
+  provider?: "tavily" | "naver" | "origin";
 }
 
 // ─── Client / API key pool ───────────────────────────────────────────────────
@@ -154,16 +157,25 @@ function exactMatchKeyword(keyword: string): string {
 }
 
 export async function collectSources(
-  keyword: string
+  keyword: string,
+  eventContext?: EventContext
 ): Promise<Record<SourceType, TavilySource[]>> {
   const exact = exactMatchKeyword(keyword);
+  const plan = eventContext
+    ? await buildSearchQueryPlanViaLlm(keyword, eventContext.articles)
+    : null;
+  const contextual =
+    plan && plan.disambiguationTerms.length > 0
+      ? `${exact} ${plan.disambiguationTerms.join(" ")}`
+      : exact;
 
-  const newsQuery = `${exact} (news OR blog OR analysis OR article OR interview)`;
-  const socialQuery = `${exact} (site:threads.net OR site:reddit.com OR site:dev.to OR site:x.com OR site:twitter.com OR site:facebook.com OR site:clien.net)`;
+  const newsQuery = `${contextual} (news OR blog OR analysis OR article OR interview)`;
+  const socialQuery = `${contextual} (site:threads.net OR site:reddit.com OR site:dev.to OR site:x.com OR site:twitter.com OR site:facebook.com OR site:clien.net)`;
   const dataQuery = `${exact} (site:youtube.com OR site:youtu.be OR site:docs.google.com OR site:drive.google.com OR site:arxiv.org OR site:openreview.net OR filetype:pdf OR dataset OR research paper OR benchmark)`;
+  const broadQuery = contextual;
 
   // 뉴스는 최근 1일 우선 수집 후, 부족하면 week로 보충
-  const [naverSources, newsDay, socialSeed, dataSeed, broadSeed] = await Promise.all([
+  const [naverSources, newsDay, socialWeek, dataSeed, broadSeed] = await Promise.all([
     collectNaverSources(keyword),
     fetchByQuery(newsQuery, "news", {
       maxResults: TAVILY_NEWS_RESULTS,
@@ -171,15 +183,15 @@ export async function collectSources(
     }),
     fetchByQuery(socialQuery, "social", {
       maxResults: TAVILY_SOCIAL_RESULTS,
-      timeRange: "month",
+      timeRange: "week",
     }),
     fetchByQuery(dataQuery, "data", {
       maxResults: TAVILY_DATA_RESULTS,
       timeRange: "month",
     }),
-    fetchByQuery(exact, "news", {
+    fetchByQuery(broadQuery, "news", {
       maxResults: TAVILY_BROAD_RESULTS,
-      timeRange: "month",
+      timeRange: "week",
     }),
   ]);
 
@@ -193,6 +205,16 @@ export async function collectSources(
     newsSeed = dedupeByUrl([...newsDay, ...newsWeek]).slice(0, TAVILY_NEWS_RESULTS);
   }
 
+  // week 결과가 부족하면 month로 보충
+  let socialSeed = socialWeek;
+  if (socialWeek.length < TAVILY_SOCIAL_RESULTS / 2) {
+    const socialMonth = await fetchByQuery(socialQuery, "social", {
+      maxResults: TAVILY_SOCIAL_RESULTS,
+      timeRange: "month",
+    });
+    socialSeed = dedupeByUrl([...socialWeek, ...socialMonth]).slice(0, TAVILY_SOCIAL_RESULTS);
+  }
+
   const merged = dedupeByUrl([
     ...naverSources.news,
     ...naverSources.social,
@@ -204,8 +226,18 @@ export async function collectSources(
   ]);
   const relevant = filterRelevantSources(merged, keyword);
 
+  const originSources = eventContext ? toOriginSources(eventContext) : [];
+  // plan이 있어도 event_summary가 비어 있으면 원본 기사 제목으로 폴백해 게이트가 항상 작동하게 한다.
+  const eventSummary =
+    plan?.eventSummary ||
+    (eventContext ? eventContext.articles.map((article) => article.title).slice(0, 3).join(" / ") : "");
+  const gated = await filterByEventRelevance(keyword, eventSummary, relevant);
+
   // 한국 자료가 있으면 먼저 노출하되, 없으면 기존 글로벌 결과를 유지합니다.
-  relevant.sort((a, b) => scoreSourcePriority(b, keyword) - scoreSourcePriority(a, keyword));
+  gated.sort((a, b) => scoreSourcePriority(b, keyword) - scoreSourcePriority(a, keyword));
+
+  // origin 소스(원본 기사)는 어휘 필터·이벤트 게이트를 거치지 않고 최우선으로 배치됩니다.
+  const ordered = dedupeByUrl([...originSources, ...gated]);
 
   const limits: Record<SourceType, number> = {
     news: TAVILY_NEWS_RESULTS,
@@ -218,7 +250,7 @@ export async function collectSources(
     data: [],
   };
 
-  for (const source of relevant) {
+  for (const source of ordered) {
     const category = classifySourceCategory(source);
     if (buckets[category].length >= limits[category]) continue;
     buckets[category].push({
