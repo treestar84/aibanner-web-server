@@ -1,6 +1,7 @@
 import type { NormalizedKeyword } from "./keywords";
 import type { RssItem } from "./rss";
 import { classifySourceCategory } from "./source_category";
+import { SNIPPET_MAX_CHARS } from "./snippet_policy";
 import type { TavilySource } from "./tavily";
 
 const MAX_EVENT_CONTEXT_ARTICLES = 5;
@@ -63,7 +64,7 @@ export function buildEventContext(
       title: item.title,
       url: item.link,
       domain: item.sourceDomain,
-      snippet: (item.summary ?? "").slice(0, 220),
+      snippet: (item.summary ?? "").slice(0, SNIPPET_MAX_CHARS),
       publishedAt: item.publishedAt ? item.publishedAt.toISOString() : null,
       tier: item.tier,
     });

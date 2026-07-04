@@ -71,6 +71,7 @@ export interface Source {
   image_url: string;
   title_ko: string | null;
   title_en: string | null;
+  provider: string | null;
   created_at: string;
 }
 
@@ -84,10 +85,12 @@ export interface RetentionCounts {
   aggregatedRows: number;
   deletedDailyStats: number;
   deletedSources: number;
+  deletedNaverSources: number;
   deletedKeywords: number;
   deletedSnapshots: number;
   deletedKeywordAliases: number;
   deletedKeywordViewCounts: number;
+  deletedYoutubeVideos: number;
 }
 
 export interface SourceIngestionState {
@@ -1252,12 +1255,12 @@ export async function insertSource(
   source: Omit<Source, "id" | "created_at">,
 ): Promise<void> {
   await sql`
-    INSERT INTO sources (snapshot_id, keyword_id, type, title, url, domain, published_at_utc, snippet, image_url, title_ko, title_en)
+    INSERT INTO sources (snapshot_id, keyword_id, type, title, url, domain, published_at_utc, snippet, image_url, title_ko, title_en, provider)
     VALUES (
       ${source.snapshot_id}, ${source.keyword_id}, ${source.type},
       ${source.title}, ${source.url}, ${source.domain},
       ${source.published_at_utc}, ${source.snippet}, ${source.image_url},
-      ${source.title_ko ?? null}, ${source.title_en ?? null}
+      ${source.title_ko ?? null}, ${source.title_en ?? null}, ${source.provider ?? null}
     )
     ON CONFLICT (snapshot_id, keyword_id, type, url)
     DO UPDATE SET
@@ -1267,7 +1270,8 @@ export async function insertSource(
       snippet = EXCLUDED.snippet,
       image_url = EXCLUDED.image_url,
       title_ko = EXCLUDED.title_ko,
-      title_en = EXCLUDED.title_en
+      title_en = EXCLUDED.title_en,
+      provider = EXCLUDED.provider
   `;
 }
 
@@ -1374,6 +1378,19 @@ export async function deleteSourcesOlderThan(
   return rows.length;
 }
 
+export async function deleteNaverSourcesOlderThan(
+  naverDays: number,
+): Promise<number> {
+  const rows = (await sql`
+    DELETE FROM sources
+    WHERE provider = 'naver'
+      AND created_at < NOW() - (${naverDays} * INTERVAL '1 day')
+    RETURNING id
+  `) as { id: number }[];
+
+  return rows.length;
+}
+
 export async function deleteKeywordsOlderThan(
   detailedDays: number,
 ): Promise<number> {
@@ -1434,29 +1451,50 @@ export async function deleteKeywordViewCountsOutsideLifecycle(
   return rows.length;
 }
 
+export async function deleteYoutubeVideosOlderThan(
+  youtubeDays: number,
+): Promise<number> {
+  // YouTube Data API 이용 정책상 응답 데이터 캐싱은 30일로 제한된다.
+  // manual_youtube_links(관리자 수동 등록)는 별도 테이블이라 영향받지 않는다.
+  const rows = (await sql`
+    DELETE FROM youtube_videos
+    WHERE published_at < NOW() - (${youtubeDays} * INTERVAL '1 day')
+    RETURNING id
+  `) as { id: number }[];
+
+  return rows.length;
+}
+
 export async function applyRetentionPolicy(
   detailedDays: number,
   aggregateDays: number,
   keywordViewLifecycleDays: number,
+  naverSourceDays: number,
+  youtubeVideoDays: number,
 ): Promise<RetentionCounts> {
   const aggregatedRows = await upsertKeywordDailyStats(aggregateDays);
   const deletedDailyStats =
     await deleteDailyKeywordStatsOlderThan(aggregateDays);
   const deletedSources = await deleteSourcesOlderThan(detailedDays);
+  const deletedNaverSources = await deleteNaverSourcesOlderThan(naverSourceDays);
   const deletedKeywords = await deleteKeywordsOlderThan(detailedDays);
   const deletedSnapshots = await deleteSnapshotsOlderThan(detailedDays);
   const deletedKeywordAliases = await deleteOrphanKeywordAliases();
   const deletedKeywordViewCounts =
     await deleteKeywordViewCountsOutsideLifecycle(keywordViewLifecycleDays);
+  const deletedYoutubeVideos =
+    await deleteYoutubeVideosOlderThan(youtubeVideoDays);
 
   return {
     aggregatedRows,
     deletedDailyStats,
     deletedSources,
+    deletedNaverSources,
     deletedKeywords,
     deletedSnapshots,
     deletedKeywordAliases,
     deletedKeywordViewCounts,
+    deletedYoutubeVideos,
   };
 }
 

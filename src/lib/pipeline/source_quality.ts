@@ -14,7 +14,7 @@ export interface SourceQualityInput {
   readonly snippet: string | null;
   readonly url: string;
   readonly domain: string | null;
-  readonly provider?: "tavily" | "naver" | "origin";
+  readonly provider?: string | null;
   readonly category?: "news" | "social" | "data" | "web" | "video" | "image";
 }
 

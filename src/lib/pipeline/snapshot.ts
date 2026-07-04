@@ -624,6 +624,7 @@ async function processKeyword(
           image_url: src.image_url,
           title_ko: src.title_ko,
           title_en: src.title_en,
+          provider: src.provider,
         })
       )
     );
@@ -781,6 +782,7 @@ async function processKeyword(
         image_url: source.imageUrl ?? defaultImage,
         title_ko: localizedTitles[idx]?.ko ?? source.title,
         title_en: localizedTitles[idx]?.en ?? source.title,
+        provider: source.provider ?? null,
       })
     )
   );

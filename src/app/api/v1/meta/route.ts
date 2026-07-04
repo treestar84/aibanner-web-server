@@ -33,6 +33,11 @@ export async function GET(req: NextRequest) {
         updatedAt: snapshot.updated_at_utc,
         nextUpdateAt: snapshot.next_update_at_utc,
         scheduleKst: scheduleKstForMode(snapshot.pipeline_mode),
+        policy: {
+          attribution:
+            "모든 요약은 출처 링크와 함께 제공됩니다. 요약과 제목 번역은 AI가 생성했습니다.",
+          takedown_contact: "angelyrlove40@gmail.com",
+        },
       },
       {
         headers: {

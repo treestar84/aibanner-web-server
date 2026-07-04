@@ -144,6 +144,8 @@ ALTER TABLE ranking_weights ADD COLUMN IF NOT EXISTS w_engagement REAL NOT NULL 
 
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS title_ko TEXT;
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS title_en TEXT;
+-- 출처 provider (naver 등 외부 검색 API 유래 소스는 보관 기간을 짧게 별도 관리)
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS provider TEXT;
 
 UPDATE keywords
 SET keyword_ko = keyword

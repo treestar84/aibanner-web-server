@@ -142,6 +142,10 @@ export async function GET(
         rank: keyword.rank,
         deltaRank: keyword.delta_rank,
         sparkline,
+        notice:
+          lang === "en"
+            ? "Summaries and title translations are AI-generated."
+            : "요약과 제목 번역은 AI가 생성했습니다.",
       },
       {
         headers: {

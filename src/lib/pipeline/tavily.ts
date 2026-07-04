@@ -18,6 +18,7 @@ export { scoreSourcePriority } from "./tavily_source_selection";
 import { toOriginSources, type EventContext } from "./event_context";
 import { buildSearchQueryPlanViaLlm } from "./search_query_plan";
 import { filterByEventRelevance } from "./event_relevance_gate";
+import { SNIPPET_MAX_CHARS } from "./snippet_policy";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -101,7 +102,7 @@ async function fetchByQuery(
     title: result.title,
     url: result.url,
     domain: extractDomain(result.url),
-    snippet: (result.content ?? "").slice(0, 220),
+    snippet: (result.content ?? "").slice(0, SNIPPET_MAX_CHARS),
     imageUrl: null,
     publishedAt: result.publishedDate ?? null,
     type: typeHint,

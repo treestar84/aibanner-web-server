@@ -1,4 +1,5 @@
 import type { PrimaryType } from "./source_category";
+import { SNIPPET_MAX_CHARS } from "./snippet_policy";
 
 type SourceType = PrimaryType;
 
@@ -124,7 +125,7 @@ function toSource(item: NaverSearchItem, type: SourceType): NaverSource | null {
     title,
     url,
     domain: extractDomain(url),
-    snippet: stripNaverHtml(item.description).slice(0, 220),
+    snippet: stripNaverHtml(item.description).slice(0, SNIPPET_MAX_CHARS),
     imageUrl: null,
     publishedAt: parseNaverPublishedAt(item),
     type,
