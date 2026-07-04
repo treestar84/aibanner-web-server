@@ -11,7 +11,23 @@ import {
   getRealtimeTrends,
   searchTrends,
 } from "@/lib/mcp/tools";
-import { GENERIC_ERROR_MESSAGE, toolError, toolSuccess } from "@/lib/mcp/policy";
+import { GENERIC_ERROR_MESSAGE, toolError, toolText } from "@/lib/mcp/policy";
+import {
+  DESC_GET_BURNING_KEYWORDS,
+  DESC_GET_DAILY_PODCAST,
+  DESC_GET_HOT_TOPICS,
+  DESC_GET_KEYWORD_DETAIL,
+  DESC_GET_REALTIME_TRENDS,
+  DESC_SEARCH_TRENDS,
+} from "@/lib/mcp/descriptions";
+import {
+  formatBurningKeywords,
+  formatDailyPodcast,
+  formatHotTopics,
+  formatKeywordDetail,
+  formatRealtimeTrends,
+  formatSearchTrends,
+} from "@/lib/mcp/markdown";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -24,18 +40,24 @@ const handler = createMcpHandler(
       "get_realtime_trends",
       {
         title: "실시간 AI 트렌드",
-        description:
-          "지금 실시간으로 뜨고 있는 AI 트렌드 키워드 순위를 반환합니다. '지금 뭐가 화제야?', '요즘 뜨는 AI 뉴스/기술 알려줘' 같은 질문에 사용. (Realtime AI trend keyword ranking)",
+        description: DESC_GET_REALTIME_TRENDS,
         inputSchema: {
           lang: langSchema,
           limit: z.number().int().min(1).max(20).default(10),
+        },
+        annotations: {
+          title: "실시간 AI 트렌드",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
         },
       },
       async ({ lang, limit }) => {
         try {
           const data = await getRealtimeTrends({ lang, limit });
           if (!data) return toolError(GENERIC_ERROR_MESSAGE);
-          return toolSuccess(data, lang);
+          return toolText(formatRealtimeTrends(data, lang), lang);
         } catch (err) {
           console.error("[mcp] get_realtime_trends", err);
           return toolError(GENERIC_ERROR_MESSAGE);
@@ -47,18 +69,24 @@ const handler = createMcpHandler(
       "get_burning_keywords",
       {
         title: "타는중 키워드",
-        description:
-          "조회수가 급상승 중인(타는중) AI 키워드를 반환합니다. '갑자기 뜨는 키워드', '급상승 트렌드' 질문에 사용.",
+        description: DESC_GET_BURNING_KEYWORDS,
         inputSchema: {
           lang: langSchema,
           limit: z.number().int().min(1).max(20).default(10),
+        },
+        annotations: {
+          title: "타는중 키워드",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
         },
       },
       async ({ lang, limit }) => {
         try {
           const data = await getBurningKeywords({ lang, limit });
           if (!data) return toolError(GENERIC_ERROR_MESSAGE);
-          return toolSuccess(data, lang);
+          return toolText(formatBurningKeywords(data, lang), lang);
         } catch (err) {
           console.error("[mcp] get_burning_keywords", err);
           return toolError(GENERIC_ERROR_MESSAGE);
@@ -70,17 +98,23 @@ const handler = createMcpHandler(
       "get_keyword_detail",
       {
         title: "키워드 상세",
-        description:
-          "특정 AI 키워드가 왜 뜨는지 상세 설명과 뉴스·커뮤니티 출처 링크를 반환합니다. 특정 키워드에 대해 더 알고 싶을 때 사용.",
+        description: DESC_GET_KEYWORD_DETAIL,
         inputSchema: {
           keyword: z.string().min(1).max(80),
           lang: langSchema,
+        },
+        annotations: {
+          title: "키워드 상세",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
         },
       },
       async ({ keyword, lang }) => {
         try {
           const data = await getKeywordDetail({ keyword, lang });
-          return toolSuccess(data, lang);
+          return toolText(formatKeywordDetail(data, lang), lang);
         } catch (err) {
           console.error("[mcp] get_keyword_detail", err);
           return toolError(GENERIC_ERROR_MESSAGE);
@@ -92,18 +126,24 @@ const handler = createMcpHandler(
       "search_trends",
       {
         title: "트렌드 검색",
-        description:
-          "과거~현재 수집된 AI 트렌드 키워드를 검색합니다. 키워드가 실시간 순위에 없을 때 사용.",
+        description: DESC_SEARCH_TRENDS,
         inputSchema: {
           query: z.string().min(1).max(80),
           lang: langSchema,
           limit: z.number().int().min(1).max(10).default(5),
         },
+        annotations: {
+          title: "트렌드 검색",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
       },
       async ({ query, lang, limit }) => {
         try {
           const data = await searchTrends({ query, lang, limit });
-          return toolSuccess(data, lang);
+          return toolText(formatSearchTrends(data, lang), lang);
         } catch (err) {
           console.error("[mcp] search_trends", err);
           return toolError(GENERIC_ERROR_MESSAGE);
@@ -115,17 +155,23 @@ const handler = createMcpHandler(
       "get_hot_topics",
       {
         title: "오늘의 AI 핫토픽",
-        description:
-          "오늘의 AI 핫토픽 브리핑(복수 출처 종합)을 반환합니다. '오늘 AI 뉴스 정리해줘', '핫토픽 알려줘' 질문에 사용.",
+        description: DESC_GET_HOT_TOPICS,
         inputSchema: {
           limit: z.number().int().min(1).max(20).default(10),
+        },
+        annotations: {
+          title: "오늘의 AI 핫토픽",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
         },
       },
       async ({ limit }) => {
         try {
           const data = await getHotTopics({ limit });
           if (!data) return toolError(GENERIC_ERROR_MESSAGE);
-          return toolSuccess(data, "ko");
+          return toolText(formatHotTopics(data), "ko");
         } catch (err) {
           console.error("[mcp] get_hot_topics", err);
           return toolError(GENERIC_ERROR_MESSAGE);
@@ -137,9 +183,15 @@ const handler = createMcpHandler(
       "get_daily_podcast",
       {
         title: "오늘의 AI 뉴스 팟캐스트",
-        description:
-          "매일 자동 생성되는 한국어 AI 뉴스 팟캐스트(2인 진행 토크쇼, 오디오)를 반환합니다. '오늘 AI 뉴스 들려줘', '팟캐스트 틀어줘' 질문에 사용. audio_url을 사용자에게 재생 가능한 링크로 제공하세요.",
+        description: DESC_GET_DAILY_PODCAST,
         inputSchema: {},
+        annotations: {
+          title: "오늘의 AI 뉴스 팟캐스트",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
       },
       async () => {
         try {
@@ -149,7 +201,7 @@ const handler = createMcpHandler(
               "오늘의 팟캐스트를 아직 준비하지 못했어요. 잠시 후 다시 시도해주세요."
             );
           }
-          return toolSuccess(data, "ko");
+          return toolText(formatDailyPodcast(data), "ko");
         } catch (err) {
           console.error("[mcp] get_daily_podcast", err);
           return toolError(GENERIC_ERROR_MESSAGE);
@@ -157,7 +209,13 @@ const handler = createMcpHandler(
       }
     );
   },
-  {},
+  {
+    serverInfo: {
+      name: "vibenow-trends",
+      version: "1.0.0",
+    },
+    capabilities: { tools: {} },
+  },
   {
     basePath: "/api/mcp",
     maxDuration: 60,

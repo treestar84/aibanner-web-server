@@ -4,27 +4,10 @@
 
 export type McpLang = "ko" | "en";
 
-export const ATTRIBUTION_TEXT =
-  "모든 요약은 출처 링크와 함께 제공됩니다. 원문은 sources의 url을 참조하세요.";
 export const TAKEDOWN_CONTACT = "angelyrlove40@gmail.com";
 
-export interface McpMeta {
-  generated_at: string;
-  lang: McpLang;
-  summaries_are_ai_generated: true;
-  attribution: string;
-  takedown_contact: string;
-}
-
-export function buildMeta(lang: McpLang): McpMeta {
-  return {
-    generated_at: new Date().toISOString(),
-    lang,
-    summaries_are_ai_generated: true,
-    attribution: ATTRIBUTION_TEXT,
-    takedown_contact: TAKEDOWN_CONTACT,
-  };
-}
+const FOOTER_KO = `\n\n---\n_요약은 AI가 생성했으며, 각 항목의 출처 링크에서 원문을 확인할 수 있습니다. (Vibenow · 문의: ${TAKEDOWN_CONTACT})_`;
+const FOOTER_EN = `\n\n---\n_Summaries are AI-generated. See linked sources for original articles. (Vibenow · contact: ${TAKEDOWN_CONTACT})_`;
 
 export interface McpToolResult {
   [key: string]: unknown;
@@ -32,11 +15,11 @@ export interface McpToolResult {
   isError?: boolean;
 }
 
-/** 도구 성공 응답: { data, meta } 컴팩트 JSON 텍스트 컨텐츠로 직렬화한다. */
-export function toolSuccess(data: unknown, lang: McpLang): McpToolResult {
-  const payload = { data, meta: buildMeta(lang) };
+/** 도구 성공 응답: 정제된 마크다운 텍스트에 lang별 footer(AI 생성 고지 + takedown 연락처)를 붙여 반환한다. */
+export function toolText(markdown: string, lang: McpLang): McpToolResult {
+  const footer = lang === "en" ? FOOTER_EN : FOOTER_KO;
   return {
-    content: [{ type: "text", text: JSON.stringify(payload) }],
+    content: [{ type: "text", text: `${markdown}${footer}` }],
   };
 }
 
