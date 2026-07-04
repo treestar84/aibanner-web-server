@@ -7,7 +7,7 @@
 - `/app`: 최신 스냅샷 기준 **AI 트렌드 Top10**(순위/변동/요약/썸네일) 표시.
 - `/k/:id`: 키워드 상세(요약 + 출처를 `news/social/data`로 그룹) 표시.
 - `/api/v1/meta`: 최신 스냅샷/다음 업데이트 시각 제공.
-- `/api/v1/trends/top?limit=&lang=ko|en`: 랭킹 목록 제공(최대 50).
+- `/api/v1/trends/top?limit=&lang=ko|en`: 랭킹 목록 제공(최대 50). 응답 최상위에 `minSupportedVersion`(semver, env `VIBENOW_MIN_SUPPORTED_VERSION`, 기본 `1.0.0`) 포함 — Flutter 클라이언트 강제 업데이트 게이트용(`src/lib/api/app_version.ts`).
 - `/api/v1/keywords/:id?lang=ko|en&snapshotId=`: 키워드 상세 제공.
 - `/api/v1/search?q=&lang=ko|en`: DB 우선 검색, 실패 시 Tavily+Naver 하이브리드 fallback.
 - `/api/cron/snapshot` (`GET/POST`): 스냅샷 파이프라인 + retention 실행(`CRON_SECRET` 지원).
@@ -63,7 +63,12 @@
 - **Flutter 큐 규칙**: 세션 내 Set 중복 제거 → 5개 누적 또는 앱 백그라운드 진입 시 flush. 타이머 없음.
 - 효과: 하루 최대 150,000 함수 호출 → 약 9,000건 (94% 감소).
 
-## 8) 구현 갭/주의(현재 코드 기준)
+## 8) 클라이언트 강제 업데이트 게이트 (2026-07-04 적용)
+- `src/lib/api/app_version.ts`의 `getMinSupportedVersion()`이 `VIBENOW_MIN_SUPPORTED_VERSION`을 읽고 미설정 시 `'1.0.0'`을 반환.
+- `src/app/api/v1/trends/top/route.ts` 성공 응답 최상위에 `minSupportedVersion` 필드로 노출.
+- Flutter 쪽은 `package_info_plus`로 읽은 설치 버전과 비교(`lib/core/providers/update_required_provider.dart`)해 미달 시 업데이트 다이얼로그 표시. 서버 env를 올릴 때는 실제 배포된 최소 버전과 반드시 맞출 것 — 잘못 올리면 최신 버전 사용자까지 업데이트 다이얼로그를 보게 된다.
+
+## 9) 구현 갭/주의(현재 코드 기준)
 - `keyword_aliases` 테이블은 검색 join에 사용되며 스냅샷 처리 시 canonical/ko/en alias를 upsert함.
 - `snapshot.ts`의 수집 결과는 `SOURCE_PLANS` 배열 순서와 구조 분해 순서가 반드시 일치해야 함. 과거 12개 plan 대비 10개만 구조 분해해 `reddit`, `google_alerts` 결과가 유실되고 `techmeme`이 잘못 매핑되던 문제가 있었으므로, 신규 수집기 추가 시 이 주석과 테스트를 함께 확인.
 - `.env.example`에는 현재 미사용 키(`UPSTASH`, `RATE_LIMIT_RPM`, `TAVILY_WEB_RESULTS`)가 남아 있음. Naver 보강은 `NAVER_CLIENT_ID/SECRET`이 있을 때만 활성화됨.

@@ -8,6 +8,7 @@ import { normalizePrimaryType } from "@/lib/pipeline/source_category";
 import { buildSnsDeeplinks } from "@/lib/pipeline/sns_deeplinks";
 import { parsePipelineMode } from "@/lib/pipeline/mode";
 import { buildFreshness, cacheControlByMode } from "@/lib/api/freshness";
+import { getMinSupportedVersion } from "@/lib/api/app_version";
 import {
   isTop20LightweightGuardEnabled,
   selectTopTrendDisplayKeywords,
@@ -57,6 +58,7 @@ export async function GET(req: NextRequest) {
         snapshotId: snapshot.snapshot_id,
         updatedAt: snapshot.updated_at_utc,
         nextUpdateAt: snapshot.next_update_at_utc,
+        minSupportedVersion: getMinSupportedVersion(),
         items: visibleKeywords.map((kw) => {
           const localizedKeyword = lang === "en"
             ? (kw.keyword_en || kw.keyword)

@@ -54,7 +54,7 @@
 
 ### 3.2 `GET /api/v1/trends/top`
 
-최신 스냅샷의 랭킹 키워드 목록을 반환합니다.
+최신 스냅샷의 랭킹 키워드 목록을 반환합니다. 응답의 `minSupportedVersion`(semver, env `VIBENOW_MIN_SUPPORTED_VERSION`, 기본 `1.0.0`)은 Flutter 클라이언트의 강제 업데이트 게이트에 사용됩니다.
 
 쿼리 파라미터:
 
@@ -74,6 +74,7 @@ curl "http://localhost:3000/api/v1/trends/top?limit=10&lang=ko"
   "snapshotId": "20260227_2100_KST",
   "updatedAt": "2026-02-27T12:00:00.000Z",
   "nextUpdateAt": "2026-02-27T21:00:00.000Z",
+  "minSupportedVersion": "1.0.0",
   "items": [
     {
       "id": "gpt_5_1",
