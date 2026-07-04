@@ -75,17 +75,22 @@ const SUMMARY_MAX_CHARS = parsePositiveIntEnv(
 function buildSystemPrompt(langLabel: "Korean" | "English"): string {
   const today = new Date().toISOString().slice(0, 10);
   return `You are an AI trend analyst. Today is ${today}.
-Given a keyword and its related news snippets (with publication dates), respond with a JSON object containing a summary and hashtag bullets in ${langLabel}.
+The keyword below appeared on TODAY's realtime AI trend ranking. Respond with a JSON object containing a summary and hashtag bullets in ${langLabel}.
+
+The context lines are labeled:
+- [TRIGGER]: the actual articles that put this keyword on today's ranking. These are the ground truth for WHY it is trending now.
+- [BACKGROUND]: general web search results about the keyword. They may be outdated, or about a DIFFERENT product/person/project that happens to share the same name. Use them only to explain what the keyword is, and ONLY when they clearly refer to the same subject as the TRIGGER lines.
 
 Response format (STRICT JSON, no markdown fences):
 {"summary":"...","bullets":["#Tag1","#Tag2","#Tag3"]}
 
 Rules (STRICT):
 - "summary": Maximum ${SUMMARY_MAX_CHARS} characters, plain prose, NO emojis, NO bullet points, NO markdown.
-  * Clearly explain what the keyword is: its meaning, product/category/function/concept, and practical relevance.
-  * Include a current attention reason only when the snippets clearly support it; otherwise do not guess and stay focused on explaining the keyword itself.
+  * Structure: FIRST state what happened that made this keyword trend now (1-2 sentences, grounded in the TRIGGER lines), THEN briefly explain what the keyword is (product/category/function/concept).
+  * If the TRIGGER lines do not clearly show a specific event, do NOT invent one — just explain the keyword itself accurately.
+  * NEVER blend in BACKGROUND content that describes a different entity with the same name or an unrelated past event. When TRIGGER and BACKGROUND conflict, trust TRIGGER.
   * Do NOT mention the source, feed, ranking site, community, or publication that surfaced the keyword (for example Product Hunt, Hacker News, Reddit, YouTube, GitHub Releases, or a news outlet).
-  * Be factual and specific. Mention dates or timeframes only when they clarify the keyword itself or a clearly relevant event.
+  * Be factual and specific. Mention dates or timeframes only when they clarify the trending event or the keyword itself.
 - "bullets": 3-5 hashtag keywords that capture the core themes (e.g. "#Regulation", "#OpenSource"). Each tag must start with #. Use ${langLabel} where natural, keep proper nouns/tech terms in original form.`;
 }
 
@@ -119,28 +124,64 @@ function parseSummaryResponse(raw: string): SummaryResult {
   }
 }
 
+export interface SummaryRankingSignals {
+  isNew?: boolean;
+  matchedArticleCount?: number;
+  latestTriggerPublishedAt?: string | null;
+}
+
 export async function generateSummaries(
   keyword: string,
   sources: TavilySource[],
-  rssContext: Array<{ title: string; snippet: string }> = []
+  rssContext: Array<{
+    title: string;
+    snippet: string;
+    publishedAt?: string | null;
+    domain?: string;
+  }> = [],
+  signals?: SummaryRankingSignals
 ): Promise<SummariesResult> {
   const client = new OpenAI();
 
-  const rssLines = rssContext
-    .slice(0, 3)
+  const triggerLines = rssContext
+    .slice(0, 5)
     .filter((r) => r.title)
-    .map((r) => `- [Original] ${r.title}${r.snippet ? `: ${r.snippet.slice(0, 150)}` : ""}`);
-  const tavilyLines = sources
+    .map((r) => {
+      const dateTag = r.publishedAt ? `[${r.publishedAt.slice(0, 10)}] ` : "";
+      const domainTag = r.domain ? ` (${r.domain})` : "";
+      return `- [TRIGGER] ${dateTag}${r.title}${domainTag}${r.snippet ? `: ${r.snippet.slice(0, 200)}` : ""}`;
+    });
+  const backgroundLines = sources
     .slice(0, SUMMARY_CONTEXT_LIMIT)
     .map((s) => {
       const dateTag = s.publishedAt ? `[${s.publishedAt.slice(0, 10)}] ` : "";
-      return `- ${dateTag}${s.title}: ${s.snippet}`;
+      return `- [BACKGROUND] ${dateTag}${s.title}: ${s.snippet}`;
     });
-  const context = [...rssLines, ...tavilyLines]
-    .slice(0, SUMMARY_CONTEXT_LIMIT + 3)
+  const context = [...triggerLines, ...backgroundLines]
+    .slice(0, SUMMARY_CONTEXT_LIMIT + 5)
     .join("\n");
 
-  const userMessage = `Keyword: "${keyword}"\n\nRelated news:\n${context}`;
+  const signalParts: string[] = [];
+  if (signals?.isNew != null) {
+    signalParts.push(
+      signals.isNew
+        ? "first appearance on the ranking today"
+        : "already on the ranking before today"
+    );
+  }
+  if (signals?.matchedArticleCount != null && signals.matchedArticleCount > 0) {
+    signalParts.push(`${signals.matchedArticleCount} trigger article(s) matched`);
+  }
+  if (signals?.latestTriggerPublishedAt) {
+    signalParts.push(
+      `latest trigger article: ${signals.latestTriggerPublishedAt.slice(0, 10)}`
+    );
+  }
+  const signalLine = signalParts.length > 0
+    ? `\nRanking signals: ${signalParts.join("; ")}.`
+    : "";
+
+  const userMessage = `Keyword: "${keyword}"${signalLine}\n\nContext:\n${context}`;
   const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 
   try {

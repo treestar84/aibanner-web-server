@@ -690,14 +690,29 @@ async function processKeyword(
   }
 
   // RSS 원본 기사에서 컨텍스트 추출 (이벤트 컨텍스트 재사용)
-  const rssContext: Array<{ title: string; snippet: string }> = eventContext.articles.map(
-    (article) => ({ title: article.title, snippet: article.snippet })
+  const rssContext = eventContext.articles.map((article) => ({
+    title: article.title,
+    snippet: article.snippet,
+    publishedAt: article.publishedAt,
+    domain: article.domain,
+  }));
+  const latestTriggerPublishedAt = eventContext.articles.reduce<string | null>(
+    (latest, article) =>
+      article.publishedAt && (!latest || article.publishedAt > latest)
+        ? article.publishedAt
+        : latest,
+    null
   );
 
   const summaries = await generateSummaries(
     kw.keyword,
     sourcesMap.news.length > 0 ? sourcesMap.news : allSources.slice(0, 5),
-    rssContext
+    rssContext,
+    {
+      isNew: item.isNew,
+      matchedArticleCount: eventContext.articles.length,
+      latestTriggerPublishedAt,
+    }
   );
   const localizedKeyword = await ensureLocalizedKeyword(kw.keyword);
   const primaryType = determinePrimaryType(allSources);
