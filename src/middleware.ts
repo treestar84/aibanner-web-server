@@ -11,12 +11,18 @@ import {
 const WINDOW_MS = 60_000; // 1분 윈도우
 const MAX_TRACKER_ENTRIES = 10_000; // 메모리 보호 상한
 
+function getMcpRateLimitRpm(): number {
+  const parsed = Number.parseInt(process.env.MCP_RATE_LIMIT_RPM ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
+}
+
 // 경로 prefix별 분당 허용 요청 수 (IP당)
 const RATE_LIMITS: [prefix: string, rpm: number][] = [
   ["/api/v1/search", 10],     // Tavily 비용 보호 — 검색은 빡빡하게
   ["/api/v1/trends", 30],     // 트렌드 목록
   ["/api/v1/keywords", 60],   // 키워드 상세 (여러 개 탐색 고려)
   ["/api/v1/", 100],          // 기타 v1 엔드포인트
+  ["/api/mcp", 60],           // MCP 서버 — PlayMCP 등 게이트웨이 대비, env MCP_RATE_LIMIT_RPM으로 조정
 ];
 
 type WindowEntry = { count: number; windowStart: number };
@@ -28,6 +34,7 @@ function getClientIp(req: NextRequest): string {
 }
 
 function getRpm(pathname: string): number {
+  if (pathname.startsWith("/api/mcp")) return getMcpRateLimitRpm();
   for (const [prefix, rpm] of RATE_LIMITS) {
     if (pathname.startsWith(prefix)) return rpm;
   }
@@ -91,7 +98,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // 2) Public API — IP Rate Limiting
-  if (pathname.startsWith("/api/v1/")) {
+  if (pathname.startsWith("/api/v1/") || pathname.startsWith("/api/mcp")) {
     maybeCleanupTracker();
     const ip = getClientIp(req);
     if (isRateLimited(ip, pathname)) {
@@ -113,5 +120,10 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/:path*", "/api/v1/:path*"],
+  matcher: [
+    "/admin/:path*",
+    "/api/admin/:path*",
+    "/api/v1/:path*",
+    "/api/mcp/:path*",
+  ],
 };
