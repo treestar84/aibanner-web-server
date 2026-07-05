@@ -86,8 +86,10 @@ Response format (STRICT JSON, no markdown fences):
 
 Rules (STRICT):
 - "summary": Maximum ${SUMMARY_MAX_CHARS} characters, plain prose, NO emojis, NO bullet points, NO markdown.
-  * Structure: FIRST state what happened that made this keyword trend now (1-2 sentences, grounded in the TRIGGER lines), THEN briefly explain what the keyword is (product/category/function/concept).
-  * If the TRIGGER lines do not clearly show a specific event, do NOT invent one — just explain the keyword itself accurately.
+  * Structure: FIRST state the concrete event or news itself (1-2 sentences, grounded in the TRIGGER lines), THEN briefly explain what the keyword is (product/category/function/concept).
+  * NEVER open with meta commentary about the trend or ranking itself. Forbidden patterns include (and any variations of): "이 키워드가 트렌드에 오른 이유는", "이 키워드가 트렌드에 등장했습니다", "처음으로 등장했습니다", "오늘 주목받고 있습니다", "this keyword is trending because", "appeared on the ranking". The app UI already shows rank/new status — do not restate it. Start directly with the event: WHO did WHAT (e.g. "X가 호스팅형 MCP 서버를 출시했습니다.").
+  * Ranking signals below are internal grounding context ONLY — never recite or paraphrase them in the summary.
+  * If the TRIGGER lines do not clearly show a specific event, do NOT invent one — just explain the keyword itself accurately, again without any trend/ranking meta commentary.
   * NEVER blend in BACKGROUND content that describes a different entity with the same name or an unrelated past event. When TRIGGER and BACKGROUND conflict, trust TRIGGER.
   * Do NOT mention the source, feed, ranking site, community, or publication that surfaced the keyword (for example Product Hunt, Hacker News, Reddit, YouTube, GitHub Releases, or a news outlet).
   * Be factual and specific. Mention dates or timeframes only when they clarify the trending event or the keyword itself.
