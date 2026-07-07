@@ -132,6 +132,33 @@ export interface SummaryRankingSignals {
   latestTriggerPublishedAt?: string | null;
 }
 
+const FULLTEXT_TOTAL_BUDGET_CHARS = 8000;
+
+/**
+ * Jina Reader로 가져온 상위 소스 전문(全文) 발췌 블록을 생성한다.
+ * 전체 발췌 길이가 예산(FULLTEXT_TOTAL_BUDGET_CHARS)을 넘으면 마지막 항목을 잘라낸다.
+ * fullTexts가 비어있으면 빈 문자열을 반환해 프롬프트가 기존과 완전히 동일하게 유지된다.
+ */
+function buildFullTextBlock(
+  fullTexts: Array<{ url?: string; domain: string; text: string }>
+): string {
+  if (fullTexts.length === 0) return "";
+
+  const entries: string[] = [];
+  let remaining = FULLTEXT_TOTAL_BUDGET_CHARS;
+
+  for (const { domain, text } of fullTexts) {
+    if (remaining <= 0) break;
+    const truncated = text.length > remaining ? text.slice(0, remaining) : text;
+    remaining -= truncated.length;
+    entries.push(`(도메인: ${domain})\n${truncated}`);
+  }
+
+  if (entries.length === 0) return "";
+
+  return `\n\n[원문 전문 발췌 — 아래 발췌가 스니펫과 충돌하면 발췌를 우선하라]\n${entries.join("\n\n")}`;
+}
+
 export async function generateSummaries(
   keyword: string,
   sources: TavilySource[],
@@ -141,7 +168,8 @@ export async function generateSummaries(
     publishedAt?: string | null;
     domain?: string;
   }> = [],
-  signals?: SummaryRankingSignals
+  signals?: SummaryRankingSignals,
+  fullTexts: Array<{ url?: string; domain: string; text: string }> = []
 ): Promise<SummariesResult> {
   const client = new OpenAI();
 
@@ -183,7 +211,8 @@ export async function generateSummaries(
     ? `\nRanking signals: ${signalParts.join("; ")}.`
     : "";
 
-  const userMessage = `Keyword: "${keyword}"${signalLine}\n\nContext:\n${context}`;
+  const fullTextBlock = buildFullTextBlock(fullTexts);
+  const userMessage = `Keyword: "${keyword}"${signalLine}\n\nContext:\n${context}${fullTextBlock}`;
   const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 
   try {

@@ -10,6 +10,12 @@ const BSKY_API = "https://api.bsky.app/xrpc";
 export const BSKY_DOMAIN_SEARCHES: ReadonlyArray<{ q: string; domain: string }> = [
   { q: "ai", domain: "github.com" },
   { q: "model", domain: "huggingface.co" },
+  // 2026-07-07 검증: 실제 searchPosts API에 curl 스모크 테스트 후 추가
+  // (모두 &domain=... 파라미터 방식으로 기존 코드와 동일하게 동작 확인).
+  { q: "paper", domain: "arxiv.org" }, // 신규 논문 발표
+  { q: "release", domain: "github.com" }, // 신규 릴리즈
+  { q: "model", domain: "openai.com" }, // OpenAI 모델 발표
+  { q: "model", domain: "anthropic.com" }, // Anthropic 모델 발표
 ];
 
 // 채널 B: 발표/릴리즈 큐레이션 계정 (2026-06 검증된 활성 계정)
@@ -17,6 +23,14 @@ export const BSKY_CURATED_ACCOUNTS: readonly string[] = [
   "unsloth.ai", // HF 모델 릴리즈 속보
   "clihub.org", // CLI 도구 릴리즈
   "github-trending-js.bsky.social", // GitHub 급상승 레포
+  // 2026-07-07 검증: getProfile 200 + getAuthorFeed 최근 30일 내 게시물 확인.
+  // hf.co/huggingface.bsky.social(피드 0건), ollama.com/mistral.ai/jeremy.fast.ai/
+  // deepmind.google(handle 미해석 400), langchain.bsky.social/swyx.io(30일 초과 stale)는
+  // 검증 실패로 제외.
+  "simonwillison.net", // AI/LLM 업계 분석
+  "theverge.com", // 테크 뉴스
+  "techcrunch.com", // 테크 뉴스
+  "arstechnica.com", // 테크 뉴스
 ];
 
 // 검색 채널 스팸 방어: 좋아요+리포스트 최소값 (큐레이션 계정에는 미적용)

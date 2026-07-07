@@ -10,7 +10,6 @@ export {
 } from "./tavily_client_pool";
 import {
   filterRelevantSources,
-  isKoreanPreferredSource,
   scoreSourcePriority,
 } from "./tavily_source_selection";
 export { isKoreanPreferredSource } from "./tavily_source_selection";
@@ -19,6 +18,7 @@ import { toOriginSources, type EventContext } from "./event_context";
 import { buildSearchQueryPlanViaLlm } from "./search_query_plan";
 import { filterByEventRelevance } from "./event_relevance_gate";
 import { SNIPPET_MAX_CHARS } from "./snippet_policy";
+import { exaSearch, isExaEnabled } from "./exa_source";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,7 +32,7 @@ export interface TavilySource {
   imageUrl: string | null;
   publishedAt: string | null;
   type: SourceType;
-  provider?: "tavily" | "naver" | "origin";
+  provider?: "tavily" | "naver" | "origin" | "exa";
 }
 
 // ─── Client / API key pool ───────────────────────────────────────────────────
@@ -93,11 +93,36 @@ async function fetchByQuery(
   typeHint: SourceType,
   options: { maxResults: number; timeRange: "day" | "week" | "month" }
 ): Promise<TavilySource[]> {
-  const results = await fetchTavilySearch(query, options, {
-    maxKeyAttempts: TAVILY_MAX_KEY_ATTEMPTS,
-    rateLimitMinutes: TAVILY_RATE_LIMIT_COOLDOWN_MINUTES,
-    quotaHours: TAVILY_QUOTA_COOLDOWN_HOURS,
-  });
+  let results: readonly { title: string; url: string; content?: string; publishedDate?: string }[] = [];
+  try {
+    results = await fetchTavilySearch(query, options, {
+      maxKeyAttempts: TAVILY_MAX_KEY_ATTEMPTS,
+      rateLimitMinutes: TAVILY_RATE_LIMIT_COOLDOWN_MINUTES,
+      quotaHours: TAVILY_QUOTA_COOLDOWN_HOURS,
+    });
+  } catch {
+    results = [];
+  }
+
+  // Tavily가 실패하거나 빈 결과를 반환하면 Exa로 폴백한다(키가 설정된 경우에만).
+  if (results.length === 0 && isExaEnabled()) {
+    console.warn(`[tavily] falling back to exa for query bucket=${typeHint}`);
+    const exaResults = await exaSearch(query, {
+      maxResults: options.maxResults,
+      timeRange: options.timeRange,
+    });
+    return exaResults.map((result) => ({
+      title: result.title,
+      url: result.url,
+      domain: extractDomain(result.url),
+      snippet: (result.content ?? "").slice(0, SNIPPET_MAX_CHARS),
+      imageUrl: null,
+      publishedAt: result.publishedDate ?? null,
+      type: typeHint,
+      provider: "exa",
+    }));
+  }
+
   return results.map((result) => ({
     title: result.title,
     url: result.url,

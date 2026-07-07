@@ -15,6 +15,13 @@ const SUBREDDITS = [
   "OpenAI",
   "aipromptprogramming",
   "IndieHacking",
+  // 2026-07 소스 확장: 이 실행 환경의 egress IP가 reddit.com/api.reddit.com에
+  // 전면 403을 반환해 후보 서브레딧 존재/활성 여부를 직접 검증하지 못함(기존
+  // 서브레딧 재요청도 동일하게 403). 검증이 차단된 상태이므로 잘 알려진
+  // 대형/활성 서브레딧만 보수적으로 추가.
+  "singularity",
+  "StableDiffusion",
+  "ChatGPT",
 ];
 
 interface RedditPost {

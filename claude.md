@@ -19,6 +19,8 @@
 - 랭킹화: recency/frequency/authority/internal 가중치 + delta rank + 신규 보너스.
 - 저장전략: `Top1~10`은 요약/소스/이미지까지 상세 저장, `Top11~20`은 lightweight 저장.
 - 소스강화: Tavily 글로벌 검색 + Naver 한국 자료 보강 + OG 이미지 보강 + 출처 타입 재분류.
+- 전문(全文) 보강(2026-07-07): 신규 키워드의 news 버킷 상위 2개 소스를 Jina Reader(`r.jina.ai`)로 전문 수집해 `generateSummaries`에 전달(`src/lib/pipeline/jina_reader.ts`). 실패/미설정 시 프롬프트가 기존 스니펫 기반과 완전히 동일(폴백 보장). env: `JINA_API_KEY`(선택), `JINA_READER_ENABLED`(기본 true), `JINA_FULLTEXT_MAX_CHARS`(기본 6000).
+- 검색 폴백(2026-07-07): `fetchByQuery`에서 Tavily가 throw하거나 0건이면 Exa REST(`src/lib/pipeline/exa_source.ts`, `provider:"exa"`)로 폴백. `EXA_API_KEY` 미설정 시 완전 비활성(현행 동일).
 - 로컬라이즈: 키워드/제목/요약 `ko/en` 쌍 저장.
 - 정리정책: retention(기본 상세 90일, 집계 365일) + `keyword_daily_stats` 집계.
 
@@ -36,7 +38,8 @@
 - `socialQuery`: `site:threads.net OR site:reddit.com OR site:dev.to OR site:x.com OR site:twitter.com OR site:facebook.com OR site:clien.net`
 - 소셜 버킷 한국 소스 우선순위 가중치: **+0.6** (뉴스/데이터 버킷은 +1.2 유지) → X/Reddit 등 글로벌 소셜 진입 공간 확보
 - X.com/Threads.net은 Tavily 크롤링 제약으로 실제 수집 불안정. 공식 API 연동 미구현.
-- Bluesky는 키워드 후보 수집 루트에 직접 포함됨. GitHub/HF 링크 도메인 필터와 큐레이션 계정 3종을 사용하고, 검색 채널은 engagement 3 이상 및 AI 관련성 정규식을 통과해야 함.
+- Bluesky는 키워드 후보 수집 루트에 직접 포함됨. 도메인 필터 검색 6종(github.com/huggingface.co/arxiv.org/openai.com/anthropic.com)과 큐레이션 계정 7종(2026-07-07 getProfile+최근30일 포스팅 검증: unsloth.ai, clihub.org, github-trending-js.bsky.social, simonwillison.net, theverge.com, techcrunch.com, arstechnica.com)을 사용하고, 검색 채널은 engagement 3 이상 및 AI 관련성 정규식을 통과해야 함.
+- Reddit 서브레딧 16종(2026-07-07 확장: singularity/StableDiffusion/ChatGPT 추가. 후보 검증 curl이 egress IP 403으로 막혀 잘 알려진 3종만 편입 — AI_Agents/mcp/GithubCopilot 등은 검증 가능 환경에서 재시도).
 - `/api/v1/keywords/:id` 응답에 `deeplinks` 필드(x_search, threads_search, youtube_search, github_search) 포함.
 
 ## 5) 키워드 파이프라인 주요 설계 결정

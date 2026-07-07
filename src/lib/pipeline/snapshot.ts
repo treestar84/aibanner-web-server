@@ -23,6 +23,7 @@ import type { PipelineMode } from "./mode";
 import { collectSources } from "./tavily";
 import { buildEventContext } from "./event_context";
 import { generateSummaries, batchTranslateTitles, classifyKeywordType, naturalizeKeywordKo } from "./summarize";
+import { fetchTopSourceFullTexts } from "./jina_reader";
 import { batchExtractOgImages } from "./og-parser";
 import { determinePrimaryType, pickPrimarySource } from "./source_category";
 import { resolveScheduleUtc, type ScheduleSlot } from "./schedule";
@@ -705,6 +706,12 @@ async function processKeyword(
     null
   );
 
+  // Jina Reader로 상위 소스 전문(全文) 보강 (실패해도 스니펫 기반 요약으로 폴백됨)
+  const fullTexts = await fetchTopSourceFullTexts(
+    sourcesMap.news.length > 0 ? sourcesMap.news : allSources,
+    2
+  );
+
   const summaries = await generateSummaries(
     kw.keyword,
     sourcesMap.news.length > 0 ? sourcesMap.news : allSources.slice(0, 5),
@@ -713,7 +720,8 @@ async function processKeyword(
       isNew: item.isNew,
       matchedArticleCount: eventContext.articles.length,
       latestTriggerPublishedAt,
-    }
+    },
+    fullTexts
   );
   const localizedKeyword = await ensureLocalizedKeyword(kw.keyword);
   const primaryType = determinePrimaryType(allSources);
