@@ -19,6 +19,9 @@ AI 트렌드 키워드를 수집/랭킹/요약해서 웹 화면과 API로 제공
 - 운영 스케줄:
   - realtime: **KST 09:10 / 11:10 / 13:10 / 15:10**
 - 보관 정책: retention 실행(상세 90일, 집계 365일 기본)
+- 전문(全文) 보강: Top10 신규 키워드의 news 상위 2개 소스를 Jina Reader로 전문 수집해 요약 품질 강화. 실패/미설정 시 기존 스니펫 요약으로 자동 폴백
+- 검색 폴백: Tavily 실패·0건 시 Exa REST 폴백(`EXA_API_KEY` 미설정 시 비활성)
+- 소셜 소스 확장: Bluesky 도메인 검색 6종 + 검증된 큐레이션 계정 7종, Reddit 서브레딧 16종
 
 ## 사용자 기능과 엔드포인트
 
@@ -146,6 +149,8 @@ npm run db:migrate
 - `GITHUB_TOKEN` (GitHub 소스 수집 품질/한도 개선)
 - `PRODUCT_HUNT_TOKEN` (Product Hunt Top Products Launching Today 반영)
 - `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` (선택, 한국 뉴스/블로그/카페 보강)
+- `JINA_API_KEY` (선택, 상위 소스 전문(全文) 수집 — 무키도 동작하나 rate limit 낮음), `JINA_READER_ENABLED`(기본 true), `JINA_FULLTEXT_MAX_CHARS`(기본 6000)
+- `EXA_API_KEY` (선택, Tavily 실패/0건 시 검색 폴백 — 미설정 시 비활성)
 - `PIPELINE_*`, `TAVILY_*`, `NAVER_*`, `RETENTION_*` 튜닝 값
 
 랭킹 품질 정책은 기본적으로 shadow-only입니다. 운영 반영은 `PIPELINE_SOURCE_QUALITY_ENABLED`, `PIPELINE_GENERIC_CONTEXT_POLICY_ENABLED`, `PIPELINE_REPEAT_EXPOSURE_POLICY_ENABLED`, `PIPELINE_TOP20_LIGHTWEIGHT_GUARD_ENABLED`를 단계적으로 켜고, 문제가 있으면 `PIPELINE_QUALITY_SHADOW_ONLY=1`과 각 플래그 `0`으로 rollback합니다.
