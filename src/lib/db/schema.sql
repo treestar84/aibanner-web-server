@@ -156,13 +156,16 @@ SET keyword_en = keyword
 WHERE COALESCE(keyword_en, '') = '';
 
 -- ============================================================
--- search_counts: 검색 쿼리별 누적 카운트
+-- search_daily_metrics: 검색 원문을 포함하지 않는 일별 요청 수 집계
 -- ============================================================
-CREATE TABLE IF NOT EXISTS search_counts (
-  query             TEXT        PRIMARY KEY,
-  count             INTEGER     NOT NULL DEFAULT 1,
-  last_searched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS search_daily_metrics (
+  metric_date   DATE        PRIMARY KEY,
+  request_count BIGINT      NOT NULL DEFAULT 0,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 이전 버전이 저장한 원문 검색어를 제거한다. 이 작업은 의도적으로 되돌릴 수 없다.
+DROP TABLE IF EXISTS search_counts;
 
 -- ============================================================
 -- keyword_view_counts: 키워드별 사용자 조회 누적
@@ -181,6 +184,18 @@ CREATE INDEX IF NOT EXISTS idx_keyword_view_counts_view_count
 
 CREATE INDEX IF NOT EXISTS idx_keyword_view_counts_last_viewed_at
   ON keyword_view_counts(last_viewed_at DESC);
+
+-- 익명화된 조회 중복 방지 토큰. IP나 원문 User-Agent는 저장하지 않는다.
+CREATE TABLE IF NOT EXISTS keyword_view_events (
+  keyword_id   TEXT        NOT NULL,
+  viewer_hash  TEXT        NOT NULL,
+  bucket_start TIMESTAMPTZ NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (keyword_id, viewer_hash, bucket_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_keyword_view_events_created_at
+  ON keyword_view_events(created_at);
 
 -- ============================================================
 -- manual_keywords: 관리자 수동 키워드 강제 노출

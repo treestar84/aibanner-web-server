@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updatePromoContent, deletePromoContent } from "@/lib/db/queries";
+import { requireAdminRequest } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -9,6 +10,8 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const { id: rawId } = await params;
     const id = parseInt(rawId, 10);
     if (isNaN(id)) {
@@ -50,10 +53,12 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const { id: rawId } = await params;
     const id = parseInt(rawId, 10);
     if (isNaN(id)) {

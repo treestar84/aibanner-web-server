@@ -4,6 +4,7 @@ import {
   upsertYoutubeRecommendChannel,
 } from "@/lib/db/queries";
 import { resolveYoutubeChannel } from "@/lib/youtube-channel-resolver";
+import { requireAdminRequest } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -21,8 +22,10 @@ function parseRequiredText(
   return { value: text };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const items = await listYoutubeRecommendChannels();
     return NextResponse.json({
       items,
@@ -36,6 +39,8 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const body = (await req.json().catch(() => null)) as
       | {
           channelUrl?: unknown;

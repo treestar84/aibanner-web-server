@@ -4,7 +4,7 @@
 
 export type McpLang = "ko" | "en";
 
-export const TAKEDOWN_CONTACT = "angelyrlove40@gmail.com";
+export const TAKEDOWN_CONTACT = "angelyrlove7@gmail.com";
 
 const FOOTER_KO = `\n\n---\n_요약은 AI가 생성했으며, 각 항목의 출처 링크에서 원문을 확인할 수 있습니다. (Vibenow · 문의: ${TAKEDOWN_CONTACT})_`;
 const FOOTER_EN = `\n\n---\n_Summaries are AI-generated. See linked sources for original articles. (Vibenow · contact: ${TAKEDOWN_CONTACT})_`;

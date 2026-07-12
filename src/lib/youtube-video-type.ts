@@ -104,3 +104,11 @@ export function parseDurationSecondsFromWatchHtml(html: string): number | null {
 
   return null;
 }
+
+/** YouTube Data API v3 `contentDetails.duration` ISO 8601 값 파서. */
+export function parseYouTubeIsoDurationSeconds(value: string | undefined): number | null {
+  if (!value) return null;
+  const match = value.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+  if (!match) return null;
+  return Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0);
+}

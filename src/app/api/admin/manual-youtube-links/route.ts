@@ -5,6 +5,7 @@ import {
   upsertManualYoutubeLink,
 } from "@/lib/db/queries";
 import { resolveManualYoutubeLink } from "@/lib/manual-youtube-resolver";
+import { requireAdminRequest } from "@/lib/admin-auth";
 import {
   normalizeYouTubeVideoType,
   type YouTubeVideoType,
@@ -32,8 +33,10 @@ function parseOptionalVideoType(value: unknown): YouTubeVideoType | null {
   return parsed === "unknown" ? null : parsed;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const [items, recentVideos] = await Promise.all([
       listManualYoutubeLinks(),
       getRecentYoutubeVideos(24),
@@ -90,6 +93,8 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const body = (await req.json().catch(() => null)) as {
       videoUrl?: unknown;
       videoType?: unknown;

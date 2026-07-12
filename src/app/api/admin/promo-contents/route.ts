@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listPromoContents, insertPromoContent } from "@/lib/db/queries";
+import { requireAdminRequest } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const items = await listPromoContents(false);
     return NextResponse.json({ items, count: items.length });
   } catch (err) {
@@ -16,6 +19,8 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const body = await req.json().catch(() => null);
     if (!body) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });

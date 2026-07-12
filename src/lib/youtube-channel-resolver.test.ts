@@ -34,26 +34,22 @@ test("resolveYoutubeChannel rejects unsafe channel URLs before fetch", async () 
   }
 });
 
-test("resolveYoutubeChannel caps oversized channel responses", async () => {
+test("resolveYoutubeChannel requires a configured official Data API key", async () => {
   const originalFetch = globalThis.fetch;
-  const mockedFetch: typeof fetch = async (_input, init) => {
-    assert.equal(init?.redirect, "manual");
-    assert.ok(init?.signal instanceof AbortSignal);
-    return new Response("", {
-      headers: {
-        "content-length": String(1024 * 1024 + 1),
-      },
-      status: 200,
-    });
+  const previousKey = process.env.YOUTUBE_DATA_API_KEY;
+  globalThis.fetch = async () => {
+    throw new Error("fetch must not be called without an API key");
   };
-  globalThis.fetch = mockedFetch;
+  delete process.env.YOUTUBE_DATA_API_KEY;
 
   try {
     await assert.rejects(
       resolveYoutubeChannel(`https://www.youtube.com/channel/${CHANNEL_ID}`),
-      /채널 응답이 너무 큽니다/,
+      /YOUTUBE_DATA_API_KEY/,
     );
   } finally {
     globalThis.fetch = originalFetch;
+    if (previousKey == null) delete process.env.YOUTUBE_DATA_API_KEY;
+    else process.env.YOUTUBE_DATA_API_KEY = previousKey;
   }
 });

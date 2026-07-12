@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- 원격 사용자 입력 썸네일은 서버 Image Optimizer를 거치지 않아 SSRF 표면을 제거한다. */
+
 import {
   useCallback,
   useEffect,

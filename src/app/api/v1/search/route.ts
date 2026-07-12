@@ -4,7 +4,7 @@ import {
   getLatestSnapshotWithKeywords,
   getSourcesByKeyword,
   searchKeywordsByText,
-  incrementSearchCount,
+  incrementSearchRequestCount,
 } from "@/lib/db/queries";
 import { collectSources } from "@/lib/pipeline/tavily";
 import { classifySourceCategory } from "@/lib/pipeline/source_category";
@@ -17,23 +17,34 @@ export const revalidate = 0;
 
 type SourceType = "news" | "social" | "data";
 const SOURCE_TYPES: SourceType[] = ["news", "social", "data"];
+const MAX_QUERY_LENGTH = 120;
+const MAX_RESULT_LIMIT = 10;
 
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const q = url.searchParams.get("q");
-    const limit = parseInt(url.searchParams.get("limit") ?? "10", 10);
+    const q = url.searchParams.get("q")?.trim() ?? "";
+    const requestedLimit = Number.parseInt(url.searchParams.get("limit") ?? "10", 10);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), MAX_RESULT_LIMIT)
+      : MAX_RESULT_LIMIT;
     const lang = url.searchParams.get("lang") === "en" ? "en" : "ko";
 
-    if (!q || q.trim() === "") {
+    if (!q) {
       return NextResponse.json({ error: "q parameter is required" }, { status: 400 });
     }
+    if (q.length > MAX_QUERY_LENGTH) {
+      return NextResponse.json(
+        { error: `q parameter must be ${MAX_QUERY_LENGTH} characters or fewer` },
+        { status: 400 },
+      );
+    }
 
-    const normalized = q.trim().toLowerCase();
+    const normalized = q.toLowerCase();
 
-    // Fire-and-forget: increment search count without blocking response
-    incrementSearchCount(normalized).catch((err) =>
-      console.error("[/api/v1/search] incrementSearchCount error:", err)
+    // 검색 원문은 저장하지 않는다. Data Safety 목적의 일별 익명 요청 수 집계만 한다.
+    incrementSearchRequestCount().catch((err) =>
+      console.error("[/api/v1/search] aggregate metric update error:", err)
     );
 
     // Get latest snapshot
@@ -41,7 +52,7 @@ export async function GET(req: NextRequest) {
 
     if (snapshot) {
       // Try DB search first
-      const keywords = await searchKeywordsByText(q.trim(), snapshot.snapshot_id);
+      const keywords = await searchKeywordsByText(q, snapshot.snapshot_id);
       const activeManualKeywordIds = await getActiveManualKeywordIds(snapshot.pipeline_mode);
       const visibleKeywords = filterActiveSnapshotKeywords(
         keywords,
@@ -53,7 +64,7 @@ export async function GET(req: NextRequest) {
         const sources = await getSourcesByKeyword(snapshot.snapshot_id, keyword.keyword_id);
         if (sources.length === 0) {
           // Lightweight 키워드(11~20)일 수 있으므로 Tavily fallback으로 계속 진행
-          console.log(`[search] No stored sources for "${keyword.keyword}", fallback to Tavily`);
+          console.info("[search] No stored sources; using provider fallback");
         } else {
           const categorized: Record<SourceType, typeof sources> = {
             news: [],
@@ -100,7 +111,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Tavily fallback
-    const tavilySources = await collectSources(q.trim());
+    const tavilySources = await collectSources(q);
     const fallbackGroups = SOURCE_TYPES.map((type) => ({
       type,
       items: (tavilySources[type] ?? []).slice(0, limit),
@@ -133,8 +144,8 @@ export async function GET(req: NextRequest) {
       tavilySources.data[0]?.snippet ??
       "";
     const fallbackKeyword = lang === "ko"
-      ? (await batchTranslateTitles([q.trim()], "ko"))[0] ?? q.trim()
-      : q.trim();
+      ? (await batchTranslateTitles([q], "ko"))[0] ?? q
+      : q;
 
     return NextResponse.json({
       id: `search_${normalized}`,

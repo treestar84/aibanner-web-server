@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listManualKeywords, upsertManualKeyword } from "@/lib/db/queries";
 import { parseManualKeywordTtlHours } from "@/lib/manual-keywords";
+import { requireAdminRequest } from "@/lib/admin-auth";
 import type { PipelineMode } from "@/lib/pipeline/mode";
 import { runSnapshotPipeline } from "@/lib/pipeline/snapshot";
 
@@ -21,6 +22,8 @@ function parseModeFromBody(_value: unknown): { mode?: PipelineMode; error?: stri
 
 export async function GET(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const modeResult = parseOptionalModeParam(req.nextUrl.searchParams.get("mode"));
     if (modeResult.error) {
       return NextResponse.json({ error: modeResult.error }, { status: 400 });
@@ -39,6 +42,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const body = (await req.json().catch(() => null)) as
       | {
           keyword?: unknown;

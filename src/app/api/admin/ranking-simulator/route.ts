@@ -6,12 +6,15 @@ import {
   getRecentSnapshots,
   getLatestSnapshotWithKeywords,
 } from "@/lib/db/queries";
+import { requireAdminRequest } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const snapshotIdParam = req.nextUrl.searchParams.get("snapshotId");
 
     // 최근 스냅샷 목록 (드롭다운용)
@@ -80,6 +83,8 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const body = (await req.json().catch(() => null)) as {
       recency?: unknown;
       frequency?: unknown;

@@ -6,6 +6,7 @@ import {
   setManualKeywordEnabled,
 } from "@/lib/db/queries";
 import { parseManualKeywordTtlHours } from "@/lib/manual-keywords";
+import { requireAdminRequest } from "@/lib/admin-auth";
 import type { PipelineMode } from "@/lib/pipeline/mode";
 import { runSnapshotPipeline } from "@/lib/pipeline/snapshot";
 
@@ -45,6 +46,8 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const params = await context.params;
     const id = parseId(params.id);
     if (!id) {
@@ -102,10 +105,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const params = await context.params;
     const id = parseId(params.id);
     if (!id) {

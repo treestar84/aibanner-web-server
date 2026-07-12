@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  adminUnauthorizedResponse,
   isAdminAuthConfigured,
   verifyAdminBasicAuth,
 } from "@/lib/admin-auth";
@@ -19,6 +20,7 @@ function getMcpRateLimitRpm(): number {
 // 경로 prefix별 분당 허용 요청 수 (IP당)
 const RATE_LIMITS: [prefix: string, rpm: number][] = [
   ["/api/v1/search", 10],     // Tavily 비용 보호 — 검색은 빡빡하게
+  ["/api/v1/keywords/views", 15], // 순위 집계 엔드포인트는 별도 제한
   ["/api/v1/trends", 30],     // 트렌드 목록
   ["/api/v1/keywords", 60],   // 키워드 상세 (여러 개 탐색 고려)
   ["/api/v1/", 100],          // 기타 v1 엔드포인트
@@ -68,15 +70,6 @@ function maybeCleanupTracker() {
 
 // ─── Admin Auth ───────────────────────────────────────────────────────────────
 
-function unauthorizedResponse() {
-  return new NextResponse("Unauthorized", {
-    status: 401,
-    headers: {
-      "WWW-Authenticate": 'Basic realm="Admin Area", charset="UTF-8"',
-    },
-  });
-}
-
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 export async function middleware(req: NextRequest) {
@@ -93,7 +86,7 @@ export async function middleware(req: NextRequest) {
     const authorized = await verifyAdminBasicAuth(
       req.headers.get("authorization")
     );
-    if (!authorized) return unauthorizedResponse();
+    if (!authorized) return adminUnauthorizedResponse();
     return NextResponse.next();
   }
 

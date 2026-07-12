@@ -5,6 +5,7 @@ import {
   updateYoutubeRecommendChannel,
 } from "@/lib/db/queries";
 import { resolveYoutubeChannel } from "@/lib/youtube-channel-resolver";
+import { requireAdminRequest } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -33,6 +34,8 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const params = await context.params;
     const id = parseId(params.id);
     if (!id) {
@@ -73,10 +76,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
     const params = await context.params;
     const id = parseId(params.id);
     if (!id) {

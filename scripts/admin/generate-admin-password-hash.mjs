@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
+import { pbkdf2Sync } from "node:crypto";
+
+const PBKDF2_ITERATIONS = 310_000;
 
 function usage() {
   console.error(
@@ -15,8 +17,7 @@ if (!password || !salt) {
   usage();
 }
 
-const hash = createHash("sha256")
-  .update(`${salt}:${password}`)
-  .digest("hex");
+const hash = pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 32, "sha256")
+  .toString("hex");
 
-console.log(hash);
+console.log(`pbkdf2$${PBKDF2_ITERATIONS}$${hash}`);

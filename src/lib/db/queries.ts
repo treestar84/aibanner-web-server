@@ -90,6 +90,7 @@ export interface RetentionCounts {
   deletedSnapshots: number;
   deletedKeywordAliases: number;
   deletedKeywordViewCounts: number;
+  deletedKeywordViewEvents: number;
   deletedYoutubeVideos: number;
 }
 
@@ -1451,6 +1452,17 @@ export async function deleteKeywordViewCountsOutsideLifecycle(
   return rows.length;
 }
 
+export async function deleteKeywordViewEventsOlderThan(
+  lifecycleDays: number,
+): Promise<number> {
+  const rows = (await sql`
+    DELETE FROM keyword_view_events
+    WHERE created_at < NOW() - (${lifecycleDays} * INTERVAL '1 day')
+    RETURNING keyword_id
+  `) as { keyword_id: string }[];
+  return rows.length;
+}
+
 export async function deleteYoutubeVideosOlderThan(
   youtubeDays: number,
 ): Promise<number> {
@@ -1482,6 +1494,8 @@ export async function applyRetentionPolicy(
   const deletedKeywordAliases = await deleteOrphanKeywordAliases();
   const deletedKeywordViewCounts =
     await deleteKeywordViewCountsOutsideLifecycle(keywordViewLifecycleDays);
+  const deletedKeywordViewEvents =
+    await deleteKeywordViewEventsOlderThan(keywordViewLifecycleDays);
   const deletedYoutubeVideos =
     await deleteYoutubeVideosOlderThan(youtubeVideoDays);
 
@@ -1494,6 +1508,7 @@ export async function applyRetentionPolicy(
     deletedSnapshots,
     deletedKeywordAliases,
     deletedKeywordViewCounts,
+    deletedKeywordViewEvents,
     deletedYoutubeVideos,
   };
 }
@@ -1521,14 +1536,16 @@ export async function searchKeywordsByText(
   `) as Keyword[];
 }
 
-export async function incrementSearchCount(query: string): Promise<void> {
-  const normalized = query.toLowerCase();
+/**
+ * 개인정보/Data Safety 정책: 검색어 자체를 저장하지 않고 요청 수만 일 단위로 집계한다.
+ */
+export async function incrementSearchRequestCount(): Promise<void> {
   await sql`
-    INSERT INTO search_counts (query, count, last_searched_at)
-    VALUES (${normalized}, 1, NOW())
-    ON CONFLICT (query) DO UPDATE
-    SET count = search_counts.count + 1,
-        last_searched_at = NOW()
+    INSERT INTO search_daily_metrics (metric_date, request_count, updated_at)
+    VALUES (CURRENT_DATE, 1, NOW())
+    ON CONFLICT (metric_date) DO UPDATE
+    SET request_count = search_daily_metrics.request_count + 1,
+        updated_at = NOW()
   `;
 }
 
@@ -1562,6 +1579,20 @@ export async function incrementKeywordViewCountBatch(
   ];
   if (!normalized.length) return;
   await Promise.all(normalized.map((id) => incrementKeywordViewCount(id)));
+}
+
+export async function claimKeywordViewEvent(
+  keywordId: string,
+  viewerHash: string,
+  bucketStart: Date,
+): Promise<boolean> {
+  const rows = (await sql`
+    INSERT INTO keyword_view_events (keyword_id, viewer_hash, bucket_start)
+    VALUES (${keywordId}, ${viewerHash}, ${bucketStart.toISOString()})
+    ON CONFLICT (keyword_id, viewer_hash, bucket_start) DO NOTHING
+    RETURNING keyword_id
+  `) as { keyword_id: string }[];
+  return rows.length > 0;
 }
 
 // ─── Snapshot candidates (ranking simulator) ─────────────────────────────────
