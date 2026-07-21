@@ -11,6 +11,7 @@ import { classifySourceCategory } from "@/lib/pipeline/source_category";
 import { buildSnsDeeplinks } from "@/lib/pipeline/sns_deeplinks";
 import { batchTranslateTitles } from "@/lib/pipeline/summarize";
 import { filterActiveSnapshotKeywords } from "@/lib/manual-keywords";
+import { cacheControlByMode } from "@/lib/api/freshness";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -95,17 +96,24 @@ export async function GET(req: NextRequest) {
           const localizedKeyword = lang === "en"
             ? (keyword.keyword_en || keyword.keyword)
             : (keyword.keyword_ko || keyword.keyword);
-          return NextResponse.json({
-            id: keyword.keyword_id,
-            keyword: localizedKeyword,
-            updatedAt: keyword.created_at,
-            summary: lang === "en"
-              ? (keyword.summary_short_en || keyword.summary_short)
-              : keyword.summary_short,
-            bullets: [],
-            sources: grouped,
-            deeplinks: buildSnsDeeplinks(localizedKeyword),
-          });
+          return NextResponse.json(
+            {
+              id: keyword.keyword_id,
+              keyword: localizedKeyword,
+              updatedAt: keyword.created_at,
+              summary: lang === "en"
+                ? (keyword.summary_short_en || keyword.summary_short)
+                : keyword.summary_short,
+              bullets: [],
+              sources: grouped,
+              deeplinks: buildSnsDeeplinks(localizedKeyword),
+            },
+            {
+              headers: {
+                "Cache-Control": cacheControlByMode(snapshot.pipeline_mode, "search"),
+              },
+            }
+          );
         }
       }
     }
@@ -147,15 +155,22 @@ export async function GET(req: NextRequest) {
       ? (await batchTranslateTitles([q], "ko"))[0] ?? q
       : q;
 
-    return NextResponse.json({
-      id: `search_${normalized}`,
-      keyword: fallbackKeyword,
-      updatedAt: new Date().toISOString(),
-      summary: firstSnippet,
-      bullets: [],
-      sources: grouped,
-      deeplinks: buildSnsDeeplinks(fallbackKeyword),
-    });
+    return NextResponse.json(
+      {
+        id: `search_${normalized}`,
+        keyword: fallbackKeyword,
+        updatedAt: new Date().toISOString(),
+        summary: firstSnippet,
+        bullets: [],
+        sources: grouped,
+        deeplinks: buildSnsDeeplinks(fallbackKeyword),
+      },
+      {
+        headers: {
+          "Cache-Control": cacheControlByMode("realtime", "search"),
+        },
+      }
+    );
   } catch (err) {
     console.error("[/api/v1/search]", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

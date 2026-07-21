@@ -32,13 +32,15 @@ function shouldSkipSource(source: { url: string; domain: string }): boolean {
 
 const MIN_FULLTEXT_CHARS = 300;
 
-// ─── Jina Reader 단건 요청 ──────────────────────────────────────────────────────
+// ─── 실패 사유 관측 ────────────────────────────────────────────────────────────
 
-/**
- * Jina Reader(r.jina.ai)로 URL의 전문 텍스트를 가져온다.
- * 실패(비-2xx, 빈 본문, 예외)는 항상 null을 반환하며 절대 throw하지 않는다.
- */
-export async function fetchFullText(url: string): Promise<string | null> {
+// fetchFullText 자체의 반환 시그니처(string | null)는 바뀌지 않는다.
+// 호출측(fetchTopSourceFullTexts)에서 사유별 집계를 위해 내부적으로만 사용하는 타입.
+type FullTextFailureReason = "httpErr" | "netErr" | "tooShort" | null;
+
+async function fetchFullTextWithReason(
+  url: string
+): Promise<{ text: string | null; reason: FullTextFailureReason }> {
   try {
     const headers: Record<string, string> = {
       Accept: "text/plain",
@@ -53,18 +55,29 @@ export async function fetchFullText(url: string): Promise<string | null> {
       signal: AbortSignal.timeout(12_000),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) return { text: null, reason: "httpErr" };
 
     const raw = await res.text();
-    if (!raw || !raw.trim()) return null;
+    if (!raw || !raw.trim()) return { text: null, reason: "tooShort" };
 
     const collapsed = raw.replace(/\n{3,}/g, "\n\n").trim();
-    if (!collapsed) return null;
+    if (!collapsed) return { text: null, reason: "tooShort" };
 
-    return collapsed.slice(0, JINA_FULLTEXT_MAX_CHARS);
+    return { text: collapsed.slice(0, JINA_FULLTEXT_MAX_CHARS), reason: null };
   } catch {
-    return null;
+    return { text: null, reason: "netErr" };
   }
+}
+
+// ─── Jina Reader 단건 요청 ──────────────────────────────────────────────────────
+
+/**
+ * Jina Reader(r.jina.ai)로 URL의 전문 텍스트를 가져온다.
+ * 실패(비-2xx, 빈 본문, 예외)는 항상 null을 반환하며 절대 throw하지 않는다.
+ */
+export async function fetchFullText(url: string): Promise<string | null> {
+  const { text } = await fetchFullTextWithReason(url);
+  return text;
 }
 
 // ─── 상위 소스 전문 배치 수집 ────────────────────────────────────────────────────
@@ -79,21 +92,31 @@ export async function fetchTopSourceFullTexts(
 ): Promise<Array<{ url: string; domain: string; text: string }>> {
   if (process.env.JINA_READER_ENABLED === "false") return [];
 
+  const skippedDomainCount = sources.filter((s) => shouldSkipSource(s)).length;
   const candidates = sources
     .filter((s) => !shouldSkipSource(s))
     .slice(0, maxCount);
 
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) {
+    if (sources.length > 0) {
+      console.log(
+        `[jina] fetched 0/${sources.length} ok (skippedDomain=${skippedDomainCount}, tooShort=0, httpErr=0, netErr=0)`
+      );
+    }
+    return [];
+  }
 
   const results = await Promise.allSettled(
     candidates.map(async (source) => {
-      const text = await fetchFullText(source.url);
-      return { url: source.url, domain: source.domain, text };
+      const { text, reason } = await fetchFullTextWithReason(source.url);
+      return { url: source.url, domain: source.domain, text, reason };
     })
   );
 
   const fetched: Array<{ url: string; domain: string; text: string }> = [];
-  let skipped = 0;
+  let tooShort = 0;
+  let httpErr = 0;
+  let netErr = 0;
 
   for (const result of results) {
     if (result.status === "fulfilled" && result.value.text && result.value.text.length >= MIN_FULLTEXT_CHARS) {
@@ -102,13 +125,33 @@ export async function fetchTopSourceFullTexts(
         domain: result.value.domain,
         text: result.value.text,
       });
-    } else {
-      skipped++;
+      continue;
+    }
+
+    if (result.status === "rejected") {
+      netErr++;
+      continue;
+    }
+
+    // fulfilled이지만 본문이 없거나 최소 길이 미달인 경우
+    switch (result.value.reason) {
+      case "httpErr":
+        httpErr++;
+        break;
+      case "netErr":
+        netErr++;
+        break;
+      case "tooShort":
+      case null:
+      default:
+        tooShort++;
+        break;
     }
   }
 
+  // Y(=candidates.length + skippedDomainCount)는 이번 배치에서 고려된 상위 소스 전체 수.
   console.log(
-    `[jina] fetched ${fetched.length}/${candidates.length} ok, ${skipped} skipped`
+    `[jina] fetched ${fetched.length}/${candidates.length + skippedDomainCount} ok (skippedDomain=${skippedDomainCount}, tooShort=${tooShort}, httpErr=${httpErr}, netErr=${netErr})`
   );
 
   return fetched;

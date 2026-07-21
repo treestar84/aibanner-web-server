@@ -14,6 +14,6 @@ export function buildFreshness(updatedAtUtc: string) {
   };
 }
 
-export function cacheControlByMode(_mode: PipelineMode, _route: "top" | "hot" | "meta"): string {
+export function cacheControlByMode(_mode: PipelineMode, _route: "top" | "hot" | "meta" | "search"): string {
   return "public, s-maxage=30, stale-while-revalidate=15";
 }

@@ -23,6 +23,7 @@ import type { PipelineMode } from "./mode";
 import { collectSources } from "./tavily";
 import { buildEventContext } from "./event_context";
 import { generateSummaries, batchTranslateTitles, classifyKeywordType, naturalizeKeywordKo } from "./summarize";
+import type { KeywordLocaleAction } from "./summarize";
 import { fetchTopSourceFullTexts } from "./jina_reader";
 import { batchExtractOgImages } from "./og-parser";
 import { determinePrimaryType, pickPrimarySource } from "./source_category";
@@ -67,7 +68,7 @@ import {
   getRankingWeights,
   getCanonicalKeywordIdsByAliases,
 } from "@/lib/db/queries";
-import type { Source, SourceIngestionState } from "@/lib/db/queries";
+import type { Keyword, Source, SourceIngestionState } from "@/lib/db/queries";
 const RANKING_CANDIDATE_LIMIT = 20;
 const DEFAULT_DETAILED_KEYWORD_LIMIT = 10;
 
@@ -440,31 +441,40 @@ function hasKoreanText(text: string): boolean {
 async function ensureLocalizedKeyword(
   keyword: string,
   existingKo?: string | null,
-  existingEn?: string | null
+  existingEn?: string | null,
+  // 스냅샷 사이클 pre-pass에서 신규 키워드들을 배치 호출해 미리 계산해 둔 결과.
+  // 존재하면 개별 gpt-4o-mini 호출을 건너뛰고 재사용한다. 미존재/미스 시 기존과
+  // 동일하게 단건 호출로 폴백하므로 동작·결과는 이전과 항상 동일하다.
+  prebatched?: Map<string, { ko: string; en: string }>
 ): Promise<{ ko: string; en: string }> {
   const fallback = keyword.trim() || keyword;
   let ko = (existingKo ?? "").trim();
   let en = (existingEn ?? "").trim();
   const fallbackHasKorean = hasKoreanText(fallback);
+  const pre = prebatched?.get(keyword);
 
   if (fallbackHasKorean) {
     if (!ko) ko = fallback;
     const needEnTranslation = !en || en === fallback;
     if (needEnTranslation) {
-      en = (await batchTranslateTitles([keyword], "en"))[0] ?? fallback;
+      en = pre?.en ?? (await batchTranslateTitles([keyword], "en"))[0] ?? fallback;
     }
   } else {
     if (!en) en = fallback;
     const needKoTranslation = !ko || ko === fallback;
     if (needKoTranslation) {
-      // keep: 영문 원문 유지, natural: 자연스러운 한국어 표기, translate: 번역
-      const [kwType] = await classifyKeywordType([keyword]);
-      if (kwType === "translate") {
-        ko = (await batchTranslateTitles([keyword], "ko"))[0] ?? fallback;
-      } else if (kwType === "natural") {
-        ko = (await naturalizeKeywordKo([keyword]))[0] ?? fallback;
+      if (pre) {
+        ko = pre.ko;
       } else {
-        ko = fallback; // keep: 영문 그대로
+        // keep: 영문 원문 유지, natural: 자연스러운 한국어 표기, translate: 번역
+        const [kwType] = await classifyKeywordType([keyword]);
+        if (kwType === "translate") {
+          ko = (await batchTranslateTitles([keyword], "ko"))[0] ?? fallback;
+        } else if (kwType === "natural") {
+          ko = (await naturalizeKeywordKo([keyword]))[0] ?? fallback;
+        } else {
+          ko = fallback; // keep: 영문 그대로
+        }
       }
     }
   }
@@ -473,6 +483,82 @@ async function ensureLocalizedKeyword(
     ko: ko || fallback,
     en: en || fallback,
   };
+}
+
+/**
+ * 스냅샷 사이클 pre-pass: "신규(로컬라이즈 캐시 없음)" 키워드 목록을 모아
+ * classifyKeywordType / batchTranslateTitles / naturalizeKeywordKo를 각각
+ * 최대 1회씩(타입별 그룹 배치)만 호출해 ko/en 쌍을 미리 계산한다.
+ * ensureLocalizedKeyword와 동일한 분기 로직을 배치 형태로 재현하므로
+ * 결과값은 기존 단건 순차 호출과 동일하다. 실패 시에도 각 배치 함수 자체가
+ * 원문 폴백을 보장하므로 여기서 별도 예외 처리는 불필요하다.
+ */
+async function buildNewKeywordLocalizationMap(
+  keywords: string[]
+): Promise<Map<string, { ko: string; en: string }>> {
+  const map = new Map<string, { ko: string; en: string }>();
+  if (keywords.length === 0) return map;
+
+  // 동일 키워드 재호출 방지: 중복 제거(원 순서 보존)
+  const uniqueKeywords = Array.from(new Set(keywords));
+
+  const koreanOrigin: string[] = [];
+  const nonKoreanOrigin: string[] = [];
+  for (const kw of uniqueKeywords) {
+    if (hasKoreanText(kw.trim() || kw)) {
+      koreanOrigin.push(kw);
+    } else {
+      nonKoreanOrigin.push(kw);
+    }
+  }
+
+  const [enForKorean, kwTypes] = await Promise.all([
+    koreanOrigin.length > 0
+      ? batchTranslateTitles(koreanOrigin, "en")
+      : Promise.resolve([] as string[]),
+    nonKoreanOrigin.length > 0
+      ? classifyKeywordType(nonKoreanOrigin)
+      : Promise.resolve([] as KeywordLocaleAction[]),
+  ]);
+
+  koreanOrigin.forEach((kw, i) => {
+    const fallback = kw.trim() || kw;
+    map.set(kw, { ko: fallback, en: enForKorean[i] ?? fallback });
+  });
+
+  const translateGroup: string[] = [];
+  const naturalGroup: string[] = [];
+  const keepGroup: string[] = [];
+  nonKoreanOrigin.forEach((kw, i) => {
+    const type = kwTypes[i] ?? "keep";
+    if (type === "translate") translateGroup.push(kw);
+    else if (type === "natural") naturalGroup.push(kw);
+    else keepGroup.push(kw);
+  });
+
+  const [translatedKo, naturalKo] = await Promise.all([
+    translateGroup.length > 0
+      ? batchTranslateTitles(translateGroup, "ko")
+      : Promise.resolve([] as string[]),
+    naturalGroup.length > 0
+      ? naturalizeKeywordKo(naturalGroup)
+      : Promise.resolve([] as string[]),
+  ]);
+
+  translateGroup.forEach((kw, i) => {
+    const fallback = kw.trim() || kw;
+    map.set(kw, { ko: translatedKo[i] ?? fallback, en: fallback });
+  });
+  naturalGroup.forEach((kw, i) => {
+    const fallback = kw.trim() || kw;
+    map.set(kw, { ko: naturalKo[i] ?? fallback, en: fallback });
+  });
+  keepGroup.forEach((kw) => {
+    const fallback = kw.trim() || kw;
+    map.set(kw, { ko: fallback, en: fallback });
+  });
+
+  return map;
 }
 
 async function localizeTitlesBilingually(
@@ -545,23 +631,27 @@ async function ensureLocalizedStoredSources(sources: Source[]): Promise<Source[]
 async function processKeyword(
   item: RankedKeywordWithDelta,
   snapshotId: string,
-  recentSnapshotIds: string[],
   defaultImage: string,
   allowExternalEnrichmentForNewKeywords: boolean,
   forceExternalEnrichmentForKeyword: boolean,
-  allSourceItems: RssItem[] = []
+  allSourceItems: RssItem[] = [],
+  // pre-pass에서 미리 조회해 둔 캐시 조회 결과. Step 8 진입 전에 이미 1회
+  // findCachedKeyword를 호출했으므로 processKeyword 내부에서는 재조회하지 않는다.
+  precomputedCached: { keyword: Keyword; sources: Source[] } | null = null,
+  // pre-pass에서 배치 계산해 둔 신규 키워드 로컬라이즈 결과 (ensureLocalizedKeyword 참고)
+  localizationPrebatchMap?: Map<string, { ko: string; en: string }>
 ): Promise<{ reused: boolean }> {
   const kw = item.keyword;
   const keywordAliases = [kw.keyword, ...kw.aliases];
 
-  // ── 캐시 조회 (최근 4 스냅샷) ──────────────────────────────────
-  const cached = await findCachedKeyword(kw.keywordId, recentSnapshotIds);
+  const cached = precomputedCached;
 
   if (cached) {
     const localizedKeyword = await ensureLocalizedKeyword(
       kw.keyword,
       cached.keyword.keyword_ko,
-      cached.keyword.keyword_en
+      cached.keyword.keyword_en,
+      localizationPrebatchMap
     );
     const localizedSources = await ensureLocalizedStoredSources(cached.sources);
     const primaryType = determinePrimaryType(localizedSources);
@@ -636,7 +726,12 @@ async function processKeyword(
     allowExternalEnrichmentForNewKeywords || forceExternalEnrichmentForKeyword;
 
   if (!allowExternalEnrichment) {
-    const localizedKeyword = await ensureLocalizedKeyword(kw.keyword);
+    const localizedKeyword = await ensureLocalizedKeyword(
+      kw.keyword,
+      undefined,
+      undefined,
+      localizationPrebatchMap
+    );
     await insertKeyword({
       snapshot_id: snapshotId,
       keyword_id: kw.keywordId,
@@ -723,7 +818,12 @@ async function processKeyword(
     },
     fullTexts
   );
-  const localizedKeyword = await ensureLocalizedKeyword(kw.keyword);
+  const localizedKeyword = await ensureLocalizedKeyword(
+    kw.keyword,
+    undefined,
+    undefined,
+    localizationPrebatchMap
+  );
   const primaryType = determinePrimaryType(allSources);
   const topSource = pickPrimarySource(allSources, primaryType, kw.keyword);
 
@@ -1101,6 +1201,29 @@ export async function runSnapshotPipeline(
   const detailedRanked = finalRanked.slice(0, profile.detailedKeywordLimit);
   const lightweightRanked = finalRanked.slice(profile.detailedKeywordLimit);
 
+  // 7.5) 신규 키워드 로컬라이즈 pre-pass — Step 8/9에서 매 신규 키워드마다
+  // classifyKeywordType/batchTranslateTitles/naturalizeKeywordKo를 단건 호출하던 것을
+  // 캐시 조회 결과를 먼저 확정한 뒤 신규분만 모아 배치 1~4회 호출로 대체한다.
+  // (자세한 설계는 상단 buildNewKeywordLocalizationMap 주석 참고)
+  const cachedByKeywordId = new Map<
+    string,
+    { keyword: Keyword; sources: Source[] } | null
+  >();
+  await Promise.all(
+    detailedRanked.map(async (item) => {
+      const cached = await findCachedKeyword(item.keyword.keywordId, recentSnapshotIds);
+      cachedByKeywordId.set(item.keyword.keywordId, cached);
+    })
+  );
+  const newDetailedKeywordTexts = detailedRanked
+    .filter((item) => cachedByKeywordId.get(item.keyword.keywordId) == null)
+    .map((item) => item.keyword.keyword);
+  const lightweightKeywordTexts = lightweightRanked.map((item) => item.keyword.keyword);
+  const localizationPrebatchMap = await buildNewKeywordLocalizationMap([
+    ...newDetailedKeywordTexts,
+    ...lightweightKeywordTexts,
+  ]);
+
   // 8) 상세 키워드 처리 — 병렬 실행
   console.log(
     `[snapshot] Step 8: Processing top ${detailedRanked.length} keywords in parallel...`
@@ -1116,11 +1239,12 @@ export async function runSnapshotPipeline(
       return processKeyword(
         item,
         snapshotId,
-        recentSnapshotIds,
         DEFAULT_IMAGE,
         profile.allowExternalEnrichmentForNewKeywords,
         forceExternalEnrichmentForKeyword,
-        allItems
+        allItems,
+        cachedByKeywordId.get(item.keyword.keywordId) ?? null,
+        localizationPrebatchMap
       );
     }
   );
@@ -1131,7 +1255,12 @@ export async function runSnapshotPipeline(
     lightweightRanked,
     LIGHTWEIGHT_CONCURRENCY,
     async (item) => {
-      const localizedKeyword = await ensureLocalizedKeyword(item.keyword.keyword);
+      const localizedKeyword = await ensureLocalizedKeyword(
+        item.keyword.keyword,
+        undefined,
+        undefined,
+        localizationPrebatchMap
+      );
       await insertKeyword({
         snapshot_id: snapshotId,
         keyword_id: item.keyword.keywordId,
