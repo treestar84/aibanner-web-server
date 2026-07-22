@@ -22,6 +22,9 @@ AI 트렌드 키워드를 수집/랭킹/요약해서 웹 화면과 API로 제공
 - 전문(全文) 보강: Top10 신규 키워드의 news 상위 2개 소스를 Jina Reader로 전문 수집해 요약 품질 강화. 실패/미설정 시 기존 스니펫 요약으로 자동 폴백
 - 검색 폴백: Tavily 실패·0건 시 Exa REST 폴백(`EXA_API_KEY` 미설정 시 비활성)
 - 소셜 소스 확장: Bluesky 도메인 검색 6종 + 검증된 큐레이션 계정 7종, Reddit 서브레딧 16종
+- 신규 키워드 로컬라이즈 배치화: 분류/번역/자연화 LLM 호출을 스냅샷당 최대 4회 배치로 처리(기존 신규 키워드 1건당 최대 3회 순차 호출 대비 절감), 저장 결과는 기존과 동일
+- Jina 전문 수집 실패 사유별 로그(`httpErr`/`netErr`/`tooShort`/도메인 스킵)로 관측성 강화
+- `/api/v1/search` 성공 응답에 `Cache-Control: public, s-maxage=30, stale-while-revalidate=15` 적용 — Vercel Edge 캐시로 동일 검색어 재요청 시 DB/Tavily 호출 절감
 
 ## 사용자 기능과 엔드포인트
 
