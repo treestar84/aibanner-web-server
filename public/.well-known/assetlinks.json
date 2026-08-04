@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.aitrendwidget.ai_trend_news",
+      "sha256_cert_fingerprints": [
+        "1B:2C:3D:D5:DC:67:7C:94:83:70:F4:11:1C:15:14:79:47:C4:0D:E9:CB:08:B1:50:6A:CE:58:88:2C:F1:D4:D0"
+      ]
+    }
+  }
+]

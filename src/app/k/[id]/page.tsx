@@ -25,8 +25,17 @@ export async function generateMetadata({
   return {
     title: `${displayKeyword} — AI 트렌드`,
     description: keyword.summary_short,
+    openGraph: {
+      title: `${displayKeyword} — Vibenow AI 트렌드`,
+      description: keyword.summary_short,
+      type: "article",
+      siteName: "Vibenow",
+    },
   };
 }
+
+const PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=com.aitrendwidget.ai_trend_news";
 
 // ─── Components ───────────────────────────────────────────────────────────────
 
@@ -163,6 +172,24 @@ export default async function KeywordDetailPage({
         <Link href={backHref} className={backClass}>
           ← {backLabel}
         </Link>
+
+        {/* App CTA — 공유 링크로 유입된 방문자를 앱 설치로 연결 */}
+        <div className="mb-6 flex items-center justify-between gap-3 rounded-xl border border-indigo-400/25 bg-indigo-950/40 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-indigo-100">
+              Vibenow 앱에서 실시간 AI 트렌드 보기
+            </p>
+            <p className="text-xs text-indigo-200/70 mt-0.5">
+              위젯·알림으로 매일 업데이트를 받아보세요
+            </p>
+          </div>
+          <a
+            href={PLAY_STORE_URL}
+            className="shrink-0 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400 transition-colors"
+          >
+            앱 받기
+          </a>
+        </div>
 
         {/* Header */}
         <header className="mb-6">

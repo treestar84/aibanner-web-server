@@ -21,6 +21,9 @@ function getMcpRateLimitRpm(): number {
 const RATE_LIMITS: [prefix: string, rpm: number][] = [
   ["/api/v1/search", 10],     // Tavily 비용 보호 — 검색은 빡빡하게
   ["/api/v1/keywords/views", 15], // 순위 집계 엔드포인트는 별도 제한
+  ["/api/v1/client-errors", 20], // 에러 리포트 — 크래시 루프 폭주 방어
+  ["/api/v1/events", 30],     // 애널리틱스 배치
+  ["/api/v1/config", 60],     // 원격 구성 (CDN 캐시가 대부분 흡수)
   ["/api/v1/trends", 30],     // 트렌드 목록
   ["/api/v1/keywords", 60],   // 키워드 상세 (여러 개 탐색 고려)
   ["/api/v1/", 100],          // 기타 v1 엔드포인트

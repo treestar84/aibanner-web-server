@@ -525,3 +525,49 @@ interface GroupedSources {
 - `src/app/api/v1/search/route.ts`
 - `src/app/api/v1/promos/route.ts`
 - `src/app/api/cron/snapshot/route.ts`
+
+## GET /api/v1/config
+
+앱 원격 구성. DB `app_config` 테이블 1순위, `VIBENOW_MIN_SUPPORTED_VERSION` env 폴백.
+
+```json
+{
+  "minSupportedVersion": "1.0.0",
+  "notice": { "id": "2026-08-1", "titleKo": "…", "titleEn": "…", "bodyKo": "…", "bodyEn": "…", "url": "" },
+  "features": { "youtube": true, "podcast": true, "analytics": true, "errorReporting": true },
+  "generatedAt": "2026-08-04T00:00:00.000Z"
+}
+```
+
+- `notice`는 없으면 `null`. `features`에 없는 키는 클라이언트가 기본 `true`로 해석.
+- `minSupportedVersion`은 서버·클라이언트 양쪽에서 semver(x.y.z) 형식 검증 — 형식 오류 시 무시(세이프가드).
+- 관리자 수정: `PUT /api/admin/app-config` `{ "key": "features"|"notice"|"min_supported_version", "value": … }` (Basic Auth).
+
+## POST /api/v1/client-errors
+
+Flutter 앱 에러 배치 리포트. `(day, fingerprint, app_version)` 그룹 집계로만 저장.
+
+```json
+{
+  "clientId": "uuid", "appVersion": "1.0.2", "platform": "android",
+  "osVersion": "14", "deviceModel": "SM-S921N",
+  "errors": [ { "fingerprint": "abc123", "message": "…", "stack": "…", "isFatal": false, "count": 3 } ]
+}
+```
+
+응답 `{ "ok": true, "accepted": n }`. 배치 최대 20건, 20rpm/IP.
+
+## POST /api/v1/events
+
+익명 애널리틱스. 클라이언트가 이름별 카운트로 사전 집계. 일 단위 집계만 저장(개별 로그·IP 미저장).
+
+```json
+{ "clientId": "uuid", "appVersion": "1.0.2", "platform": "android",
+  "events": [ { "name": "screen_home", "count": 4 }, { "name": "app_open", "count": 1 } ] }
+```
+
+이벤트명 `^[a-z0-9_]{1,64}$`, 배치 최대 50개 이름, 30rpm/IP. DAU는 `analytics_client_daily`로 계산.
+
+## GET /api/admin/telemetry?days=14
+
+에러 그룹 상위 50 + 이벤트 일 집계 + DAU (Basic Auth). 보존: 에러/클라이언트 90일, 이벤트 집계 400일 (retention 크론에서 정리).

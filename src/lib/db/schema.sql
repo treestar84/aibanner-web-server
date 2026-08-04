@@ -468,3 +468,50 @@ CREATE TABLE IF NOT EXISTS promo_contents (
 
 CREATE INDEX IF NOT EXISTS idx_promo_contents_enabled_sort
   ON promo_contents(enabled, sort_order ASC);
+
+-- ============================================================
+-- app_config: 앱 원격 구성 (kill switch / 공지 / 최소 지원 버전)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS app_config (
+  key        TEXT        PRIMARY KEY,
+  value      JSONB       NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- client_error_groups: Flutter 앱 에러 리포트 일 단위 그룹 집계
+-- ============================================================
+CREATE TABLE IF NOT EXISTS client_error_groups (
+  day          DATE        NOT NULL,
+  fingerprint  TEXT        NOT NULL,
+  app_version  TEXT        NOT NULL DEFAULT '',
+  platform     TEXT        NOT NULL DEFAULT '',
+  os_version   TEXT        NOT NULL DEFAULT '',
+  device_model TEXT        NOT NULL DEFAULT '',
+  message      TEXT        NOT NULL DEFAULT '',
+  sample_stack TEXT        NOT NULL DEFAULT '',
+  is_fatal     BOOLEAN     NOT NULL DEFAULT FALSE,
+  count        BIGINT      NOT NULL DEFAULT 0,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (day, fingerprint, app_version)
+);
+
+-- ============================================================
+-- analytics_event_daily / analytics_client_daily: 익명 사용 통계 일 집계
+-- ============================================================
+CREATE TABLE IF NOT EXISTS analytics_event_daily (
+  day         DATE   NOT NULL,
+  name        TEXT   NOT NULL,
+  app_version TEXT   NOT NULL DEFAULT '',
+  count       BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, name, app_version)
+);
+
+CREATE TABLE IF NOT EXISTS analytics_client_daily (
+  day         DATE NOT NULL,
+  client_id   TEXT NOT NULL,
+  platform    TEXT NOT NULL DEFAULT '',
+  app_version TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (day, client_id)
+);

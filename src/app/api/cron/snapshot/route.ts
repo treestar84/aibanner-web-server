@@ -6,6 +6,7 @@ import {
   type RetentionRunResult,
 } from "@/lib/pipeline/retention";
 import { collectAndStoreYoutubeRecommendations, cleanOldYoutubeVideos } from "@/lib/pipeline/youtube_recommend_source";
+import { pruneTelemetry } from "@/lib/db/telemetry";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // Hobby 플랜 함수 허용치 내에서 여유 확보
@@ -49,6 +50,11 @@ export async function GET(req: NextRequest) {
       } catch (retentionErr) {
         retentionError = String(retentionErr);
         console.error("[cron/retention]", retentionErr);
+      }
+      try {
+        await pruneTelemetry();
+      } catch (pruneErr) {
+        console.error("[cron/telemetry-prune]", pruneErr);
       }
     }
 
