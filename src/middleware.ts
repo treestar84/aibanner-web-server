@@ -25,6 +25,8 @@ const RATE_LIMITS: [prefix: string, rpm: number][] = [
   ["/api/v1/events", 30],     // 애널리틱스 배치
   ["/api/v1/config", 60],     // 원격 구성 (CDN 캐시가 대부분 흡수)
   ["/api/v1/trends", 30],     // 트렌드 목록
+  ["/api/v1/expert-picks/views", 15], // 조회수 집계 — keywords/views와 동일한 보호 수준
+  ["/api/v1/expert-picks", 60],       // 전문가픽 목록/상세
   ["/api/v1/keywords", 60],   // 키워드 상세 (여러 개 탐색 고려)
   ["/api/v1/", 100],          // 기타 v1 엔드포인트
   ["/api/mcp", 60],           // MCP 서버 — PlayMCP 등 게이트웨이 대비, env MCP_RATE_LIMIT_RPM으로 조정

@@ -470,6 +470,48 @@ CREATE INDEX IF NOT EXISTS idx_promo_contents_enabled_sort
   ON promo_contents(enabled, sort_order ASC);
 
 -- ============================================================
+-- expert_picks: 전문가픽 콘텐츠 (관리자 수동 큐레이션)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS expert_picks (
+  id             SERIAL      PRIMARY KEY,
+  title_ko       TEXT        NOT NULL,
+  title_en       TEXT        NOT NULL DEFAULT '',
+  body_ko        TEXT        NOT NULL,
+  body_en        TEXT        NOT NULL DEFAULT '',
+  body_ko_raw    TEXT        NOT NULL,
+  ai_tuned       BOOLEAN     NOT NULL DEFAULT FALSE,
+  image_url      TEXT        NOT NULL DEFAULT '',
+  link_url       TEXT        NOT NULL DEFAULT '',
+  link_domain    TEXT        NOT NULL DEFAULT '',
+  author_label   TEXT        NOT NULL DEFAULT '',
+  sort_order     INTEGER     NOT NULL DEFAULT 0,
+  enabled        BOOLEAN     NOT NULL DEFAULT TRUE,
+  view_count     BIGINT      NOT NULL DEFAULT 0,
+  last_viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 낙관적 잠금용 정수 버전. TIMESTAMPTZ(마이크로초)는 JSON 왕복에서 밀리초로
+-- 잘려 비교가 항상 실패하므로 updated_at 대신 이 컬럼을 사용한다.
+ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+
+CREATE INDEX IF NOT EXISTS idx_expert_picks_enabled_sort
+  ON expert_picks(enabled, sort_order DESC, created_at DESC);
+
+-- 익명화된 조회 중복 방지 토큰. IP나 원문 User-Agent는 저장하지 않는다.
+CREATE TABLE IF NOT EXISTS expert_pick_view_events (
+  expert_pick_id INTEGER     NOT NULL,
+  viewer_hash    TEXT        NOT NULL,
+  bucket_start   TIMESTAMPTZ NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (expert_pick_id, viewer_hash, bucket_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_expert_pick_view_events_created_at
+  ON expert_pick_view_events(created_at);
+
+-- ============================================================
 -- app_config: 앱 원격 구성 (kill switch / 공지 / 최소 지원 버전)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS app_config (
