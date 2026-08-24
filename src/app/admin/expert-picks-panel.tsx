@@ -140,18 +140,30 @@ export function ExpertPicksPanel() {
   };
 
   const handleToggle = async (item: ExpertPickItem) => {
-    await fetch(`/api/admin/expert-picks/${item.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: !item.enabled, expectedUpdatedAt: item.updated_at }),
-    });
-    await fetchItems();
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/expert-picks/${item.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !item.enabled, expectedUpdatedAt: item.updated_at }),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      await fetchItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "상태 변경 실패");
+    }
   };
 
   const handleDelete = async (id: number) => {
     if (!confirm("삭제하시겠습니까?")) return;
-    await fetch(`/api/admin/expert-picks/${id}`, { method: "DELETE" });
-    await fetchItems();
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/expert-picks/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      await fetchItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "삭제 실패");
+    }
   };
 
   return (
