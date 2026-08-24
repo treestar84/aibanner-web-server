@@ -1960,6 +1960,7 @@ export interface ExpertPick {
   last_viewed_at: string;
   created_at: string;
   updated_at: string;
+  version: number;
 }
 
 export async function listExpertPicks(
@@ -1983,11 +1984,13 @@ export async function getExpertPickById(id: number): Promise<ExpertPick | null> 
   return (rows as ExpertPick[])[0] ?? null;
 }
 
+// 비활성 행까지 포함해 MAX(updated_at)을 구한다. enabled = TRUE로 좁히면
+// 최신 항목을 비활성화했을 때 최댓값이 과거로 되돌아가 If-Modified-Since가
+// 영원히 304를 돌려준다. (행이 완전히 삭제되는 경우는 여전히 남는 한계다.)
 export async function getExpertPickMaxUpdatedAt(): Promise<string | null> {
   const rows = await sql`
     SELECT MAX(updated_at) AS max_updated_at
     FROM expert_picks
-    WHERE enabled = TRUE
   `;
   return (
     (rows as { max_updated_at: string | null }[])[0]?.max_updated_at ?? null
@@ -2005,14 +2008,15 @@ export async function insertExpertPick(input: {
   linkDomain: string;
   authorLabel: string;
   sortOrder: number;
+  aiTuned: boolean;
 }): Promise<ExpertPick> {
   const rows = await sql`
     INSERT INTO expert_picks (
       title_ko, title_en, body_ko, body_en, body_ko_raw,
-      image_url, link_url, link_domain, author_label, sort_order
+      image_url, link_url, link_domain, author_label, sort_order, ai_tuned
     ) VALUES (
       ${input.titleKo}, ${input.titleEn}, ${input.bodyKo}, ${input.bodyEn}, ${input.bodyKoRaw},
-      ${input.imageUrl}, ${input.linkUrl}, ${input.linkDomain}, ${input.authorLabel}, ${input.sortOrder}
+      ${input.imageUrl}, ${input.linkUrl}, ${input.linkDomain}, ${input.authorLabel}, ${input.sortOrder}, ${input.aiTuned}
     )
     RETURNING *
   `;
@@ -2021,7 +2025,7 @@ export async function insertExpertPick(input: {
 
 export async function updateExpertPick(
   id: number,
-  expectedUpdatedAt: string,
+  expectedVersion: number,
   input: {
     titleKo?: string;
     titleEn?: string;
@@ -2052,8 +2056,9 @@ export async function updateExpertPick(
       author_label = COALESCE(${input.authorLabel ?? null}, author_label),
       sort_order   = COALESCE(${input.sortOrder ?? null}, sort_order),
       enabled      = COALESCE(${input.enabled ?? null}, enabled),
-      updated_at   = NOW()
-    WHERE id = ${id} AND updated_at = ${expectedUpdatedAt}
+      updated_at   = NOW(),
+      version      = version + 1
+    WHERE id = ${id} AND version = ${expectedVersion}
     RETURNING *
   `;
   const updated = (rows as ExpertPick[])[0];

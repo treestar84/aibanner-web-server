@@ -17,6 +17,7 @@ interface ExpertPickItem {
   enabled: boolean;
   created_at: string;
   updated_at: string;
+  version: number;
 }
 
 async function readErrorMessage(res: Response): Promise<string> {
@@ -41,6 +42,8 @@ export function ExpertPicksPanel() {
 
   const [tuning, setTuning] = useState(false);
   const [tunedPreview, setTunedPreview] = useState<string | null>(null);
+  // "이 버전 적용"으로 확정한 AI 튜닝 본문. pasteText(붙여넣기 원문)는 절대 덮어쓰지 않는다.
+  const [appliedTunedBody, setAppliedTunedBody] = useState<string | null>(null);
 
   const parsedPreview = pasteText.trim() ? parseExpertPickPaste(pasteText) : null;
 
@@ -94,6 +97,7 @@ export function ExpertPicksPanel() {
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const data = await res.json();
       setTunedPreview(data.tunedKo);
+      setAppliedTunedBody(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "AI 튜닝 실패");
     } finally {
@@ -101,12 +105,12 @@ export function ExpertPicksPanel() {
     }
   };
 
+  // 원문 textarea는 그대로 두고, 발행 시 본문으로 쓸 튜닝 결과만 확정한다.
   const applyTuned = () => {
-    if (tunedPreview) {
-      setPasteText(tunedPreview);
-      setTunedPreview(null);
-    }
+    if (tunedPreview) setAppliedTunedBody(tunedPreview);
   };
+
+  const cancelTuned = () => setAppliedTunedBody(null);
 
   const handleSubmit = async (e: SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -121,7 +125,11 @@ export function ExpertPicksPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // bodyKoRaw는 언제나 붙여넣기 원문. bodyKo는 튜닝을 적용했을 때만 덮어쓴다.
           bodyKoRaw: pasteText,
+          ...(appliedTunedBody
+            ? { bodyKo: appliedTunedBody, aiTuned: true }
+            : { aiTuned: false }),
           imageUrl,
           authorLabel: authorLabel.trim(),
         }),
@@ -131,6 +139,7 @@ export function ExpertPicksPanel() {
       setImageUrl("");
       setAuthorLabel("");
       setTunedPreview(null);
+      setAppliedTunedBody(null);
       await fetchItems();
     } catch (err) {
       setError(err instanceof Error ? err.message : "발행 실패");
@@ -145,7 +154,7 @@ export function ExpertPicksPanel() {
       const res = await fetch(`/api/admin/expert-picks/${item.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !item.enabled, expectedUpdatedAt: item.updated_at }),
+        body: JSON.stringify({ enabled: !item.enabled, expectedVersion: item.version }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
       await fetchItems();
@@ -217,19 +226,39 @@ export function ExpertPicksPanel() {
         {tunedPreview && (
           <div className="rounded-lg border border-violet-500/40 bg-zinc-950 p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <p className="text-xs text-zinc-500 mb-1">원문</p>
+              <p className="text-xs text-zinc-500 mb-1">
+                원문
+                {!appliedTunedBody && (
+                  <span className="ml-2 text-emerald-300">· 이 버전이 발행됩니다</span>
+                )}
+              </p>
               <p className="text-sm text-zinc-300 whitespace-pre-wrap">{pasteText}</p>
             </div>
             <div>
-              <p className="text-xs text-violet-300 mb-1">AI 튜닝 결과</p>
+              <p className="text-xs text-violet-300 mb-1">
+                AI 튜닝 결과
+                {appliedTunedBody === tunedPreview && (
+                  <span className="ml-2 text-emerald-300">· 적용됨 — 이 버전이 발행됩니다</span>
+                )}
+              </p>
               <p className="text-sm text-zinc-100 whitespace-pre-wrap">{tunedPreview}</p>
-              <button
-                type="button"
-                onClick={applyTuned}
-                className="mt-3 rounded-lg bg-violet-600 hover:bg-violet-500 text-white px-4 py-1.5 text-xs font-bold"
-              >
-                이 버전 적용
-              </button>
+              {appliedTunedBody === tunedPreview ? (
+                <button
+                  type="button"
+                  onClick={cancelTuned}
+                  className="mt-3 rounded-lg border border-zinc-600 text-zinc-300 hover:text-zinc-100 px-4 py-1.5 text-xs font-bold"
+                >
+                  적용 취소 (원문으로 발행)
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={applyTuned}
+                  className="mt-3 rounded-lg bg-violet-600 hover:bg-violet-500 text-white px-4 py-1.5 text-xs font-bold"
+                >
+                  이 버전 적용
+                </button>
+              )}
             </div>
           </div>
         )}

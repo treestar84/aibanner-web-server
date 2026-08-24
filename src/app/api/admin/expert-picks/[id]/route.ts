@@ -21,14 +21,14 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     }
 
     const body = await req.json().catch(() => null);
-    if (!body || typeof body.expectedUpdatedAt !== "string") {
+    if (!body || typeof body.expectedVersion !== "number" || !Number.isFinite(body.expectedVersion)) {
       return NextResponse.json(
-        { error: "expectedUpdatedAt is required for optimistic locking" },
+        { error: "expectedVersion is required for optimistic locking" },
         { status: 400 },
       );
     }
 
-    const result = await updateExpertPick(id, body.expectedUpdatedAt, {
+    const result = await updateExpertPick(id, body.expectedVersion, {
       titleKo: typeof body.titleKo === "string" ? body.titleKo : undefined,
       titleEn: typeof body.titleEn === "string" ? body.titleEn : undefined,
       bodyKo: typeof body.bodyKo === "string" ? body.bodyKo : undefined,

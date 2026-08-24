@@ -492,6 +492,10 @@ CREATE TABLE IF NOT EXISTS expert_picks (
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 낙관적 잠금용 정수 버전. TIMESTAMPTZ(마이크로초)는 JSON 왕복에서 밀리초로
+-- 잘려 비교가 항상 실패하므로 updated_at 대신 이 컬럼을 사용한다.
+ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+
 CREATE INDEX IF NOT EXISTS idx_expert_picks_enabled_sort
   ON expert_picks(enabled, sort_order DESC, created_at DESC);
 

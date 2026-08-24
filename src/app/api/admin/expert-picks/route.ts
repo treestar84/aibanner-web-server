@@ -50,6 +50,11 @@ export async function POST(req: NextRequest) {
     const linkDomain = typeof body.linkDomain === "string" && body.linkDomain.trim()
       ? body.linkDomain.trim()
       : parsed.linkDomain;
+    // AI 튜닝을 적용한 경우에만 bodyKo가 원문과 달라진다.
+    // body_ko_raw는 어떤 경우에도 붙여넣기 원문(parsed.body)으로 고정한다.
+    const bodyKo = typeof body.bodyKo === "string" && body.bodyKo.trim()
+      ? body.bodyKo.trim()
+      : parsed.body;
 
     const maxSort = await listExpertPicks(false).then((items) =>
       items.length > 0 ? Math.max(...items.map((i) => i.sort_order)) : -1,
@@ -58,9 +63,10 @@ export async function POST(req: NextRequest) {
     const item = await insertExpertPick({
       titleKo,
       titleEn: typeof body.titleEn === "string" ? body.titleEn : "",
-      bodyKo: parsed.body,
+      bodyKo,
       bodyEn: typeof body.bodyEn === "string" ? body.bodyEn : "",
       bodyKoRaw: parsed.body,
+      aiTuned: typeof body.aiTuned === "boolean" ? body.aiTuned : false,
       imageUrl: typeof body.imageUrl === "string" ? body.imageUrl : "",
       linkUrl,
       linkDomain,
