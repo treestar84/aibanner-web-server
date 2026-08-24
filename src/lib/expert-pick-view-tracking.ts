@@ -5,8 +5,9 @@ import {
   incrementExpertPickViewCountBatch,
 } from "@/lib/db/queries";
 
+export { normalizeExpertPickIds } from "@/lib/expert-pick-id-normalization";
+
 const VIEW_BUCKET_MS = 60 * 60 * 1000;
-const MAX_IDS = 20;
 
 function getClientIp(request: Request): string {
   const forwarded = request.headers.get("x-vercel-forwarded-for")
@@ -24,14 +25,6 @@ function getViewerHash(request: Request): string | null {
 
 function currentBucket(): Date {
   return new Date(Math.floor(Date.now() / VIEW_BUCKET_MS) * VIEW_BUCKET_MS);
-}
-
-export function normalizeExpertPickIds(ids: unknown[]): number[] {
-  return [
-    ...new Set(
-      ids.filter((id): id is number => typeof id === "number" && Number.isInteger(id) && id > 0),
-    ),
-  ].slice(0, MAX_IDS);
 }
 
 export async function trackExpertPickViews(

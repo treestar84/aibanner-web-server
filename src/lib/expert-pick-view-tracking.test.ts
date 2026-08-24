@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeExpertPickIds } from "./expert-pick-view-tracking";
+import { normalizeExpertPickIds } from "./expert-pick-id-normalization";
 
 test("normalizeExpertPickIds keeps only positive integers, dedupes, caps at 20", () => {
   const input = [1, 1, 2, "3", -1, 0, 4.5, "not a number", ...Array.from({ length: 30 }, (_, i) => i + 100)];
