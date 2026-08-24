@@ -1939,3 +1939,162 @@ export async function deletePromoContent(id: number): Promise<boolean> {
   `;
   return (rows as { id: number }[]).length > 0;
 }
+
+// ─── Expert picks queries ────────────────────────────────────────────────────
+
+export interface ExpertPick {
+  id: number;
+  title_ko: string;
+  title_en: string;
+  body_ko: string;
+  body_en: string;
+  body_ko_raw: string;
+  ai_tuned: boolean;
+  image_url: string;
+  link_url: string;
+  link_domain: string;
+  author_label: string;
+  sort_order: number;
+  enabled: boolean;
+  view_count: number;
+  last_viewed_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listExpertPicks(
+  enabledOnly = false,
+): Promise<ExpertPick[]> {
+  const rows = enabledOnly
+    ? await sql`
+        SELECT * FROM expert_picks
+        WHERE enabled = TRUE
+        ORDER BY sort_order DESC, created_at DESC
+      `
+    : await sql`
+        SELECT * FROM expert_picks
+        ORDER BY sort_order DESC, created_at DESC
+      `;
+  return rows as ExpertPick[];
+}
+
+export async function getExpertPickById(id: number): Promise<ExpertPick | null> {
+  const rows = await sql`SELECT * FROM expert_picks WHERE id = ${id}`;
+  return (rows as ExpertPick[])[0] ?? null;
+}
+
+export async function getExpertPickMaxUpdatedAt(): Promise<string | null> {
+  const rows = await sql`
+    SELECT MAX(updated_at) AS max_updated_at
+    FROM expert_picks
+    WHERE enabled = TRUE
+  `;
+  return (
+    (rows as { max_updated_at: string | null }[])[0]?.max_updated_at ?? null
+  );
+}
+
+export async function insertExpertPick(input: {
+  titleKo: string;
+  titleEn: string;
+  bodyKo: string;
+  bodyEn: string;
+  bodyKoRaw: string;
+  imageUrl: string;
+  linkUrl: string;
+  linkDomain: string;
+  authorLabel: string;
+  sortOrder: number;
+}): Promise<ExpertPick> {
+  const rows = await sql`
+    INSERT INTO expert_picks (
+      title_ko, title_en, body_ko, body_en, body_ko_raw,
+      image_url, link_url, link_domain, author_label, sort_order
+    ) VALUES (
+      ${input.titleKo}, ${input.titleEn}, ${input.bodyKo}, ${input.bodyEn}, ${input.bodyKoRaw},
+      ${input.imageUrl}, ${input.linkUrl}, ${input.linkDomain}, ${input.authorLabel}, ${input.sortOrder}
+    )
+    RETURNING *
+  `;
+  return (rows as ExpertPick[])[0];
+}
+
+export async function updateExpertPick(
+  id: number,
+  expectedUpdatedAt: string,
+  input: {
+    titleKo?: string;
+    titleEn?: string;
+    bodyKo?: string;
+    bodyEn?: string;
+    aiTuned?: boolean;
+    imageUrl?: string;
+    linkUrl?: string;
+    linkDomain?: string;
+    authorLabel?: string;
+    sortOrder?: number;
+    enabled?: boolean;
+  },
+): Promise<ExpertPick | "not_found" | "conflict"> {
+  const existing = await getExpertPickById(id);
+  if (!existing) return "not_found";
+
+  const rows = await sql`
+    UPDATE expert_picks SET
+      title_ko     = COALESCE(${input.titleKo ?? null}, title_ko),
+      title_en     = COALESCE(${input.titleEn ?? null}, title_en),
+      body_ko      = COALESCE(${input.bodyKo ?? null}, body_ko),
+      body_en      = COALESCE(${input.bodyEn ?? null}, body_en),
+      ai_tuned     = COALESCE(${input.aiTuned ?? null}, ai_tuned),
+      image_url    = COALESCE(${input.imageUrl ?? null}, image_url),
+      link_url     = COALESCE(${input.linkUrl ?? null}, link_url),
+      link_domain  = COALESCE(${input.linkDomain ?? null}, link_domain),
+      author_label = COALESCE(${input.authorLabel ?? null}, author_label),
+      sort_order   = COALESCE(${input.sortOrder ?? null}, sort_order),
+      enabled      = COALESCE(${input.enabled ?? null}, enabled),
+      updated_at   = NOW()
+    WHERE id = ${id} AND updated_at = ${expectedUpdatedAt}
+    RETURNING *
+  `;
+  const updated = (rows as ExpertPick[])[0];
+  return updated ?? "conflict";
+}
+
+export async function deleteExpertPick(id: number): Promise<boolean> {
+  const rows = await sql`
+    DELETE FROM expert_picks WHERE id = ${id} RETURNING id
+  `;
+  return (rows as { id: number }[]).length > 0;
+}
+
+export async function incrementExpertPickViewCount(id: number): Promise<void> {
+  await sql`
+    UPDATE expert_picks SET
+      view_count = view_count + 1,
+      last_viewed_at = NOW(),
+      updated_at = updated_at
+    WHERE id = ${id}
+  `;
+}
+
+export async function incrementExpertPickViewCountBatch(
+  ids: number[],
+): Promise<void> {
+  const normalized = [...new Set(ids)];
+  if (!normalized.length) return;
+  await Promise.all(normalized.map((id) => incrementExpertPickViewCount(id)));
+}
+
+export async function claimExpertPickViewEvent(
+  id: number,
+  viewerHash: string,
+  bucketStart: Date,
+): Promise<boolean> {
+  const rows = (await sql`
+    INSERT INTO expert_pick_view_events (expert_pick_id, viewer_hash, bucket_start)
+    VALUES (${id}, ${viewerHash}, ${bucketStart.toISOString()})
+    ON CONFLICT (expert_pick_id, viewer_hash, bucket_start) DO NOTHING
+    RETURNING expert_pick_id
+  `) as { expert_pick_id: number }[];
+  return rows.length > 0;
+}
