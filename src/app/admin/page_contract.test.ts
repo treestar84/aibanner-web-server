@@ -9,3 +9,8 @@ test("admin youtube tab renders manual links and source channel panels", () => {
   assert.match(pageSource, /<ManualYoutubeLinksPanel \/>/);
   assert.match(pageSource, /<YoutubeSourceChannelsPanel \/>/);
 });
+
+test("admin page renders the expert-picks panel on its tab", () => {
+  assert.match(pageSource, /import \{ ExpertPicksPanel \}/);
+  assert.match(pageSource, /<ExpertPicksPanel \/>/);
+});

@@ -1,6 +1,6 @@
 "use client";
 
-export type AdminTab = "keywords" | "ranking" | "youtube" | "promo";
+export type AdminTab = "keywords" | "ranking" | "youtube" | "promo" | "expertPicks";
 
 interface AdminNavProps {
   activeTab: AdminTab;
@@ -12,6 +12,7 @@ const TABS: Array<{ id: AdminTab; label: string; href?: string }> = [
   { id: "ranking", label: "랭킹 시뮬레이터", href: "/admin/ranking-simulator" },
   { id: "youtube", label: "유튜브 수집 채널" },
   { id: "promo", label: "프로모션 관리" },
+  { id: "expertPicks", label: "전문가픽 관리" },
 ];
 
 export function AdminNav({ activeTab, onTabChange }: AdminNavProps) {

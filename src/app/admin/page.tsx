@@ -10,6 +10,7 @@ import {
 import { YoutubeSourceChannelsPanel } from "./youtube-source-channels-panel";
 import { ManualYoutubeLinksPanel } from "./manual-youtube-links-panel";
 import { PromoContentsPanel } from "./promo-contents-panel";
+import { ExpertPicksPanel } from "./expert-picks-panel";
 import { AdminNav, type AdminTab } from "./admin-nav";
 import {
   buildManualKeywordFeedback,
@@ -463,6 +464,9 @@ export default function AdminPage() {
 
         {/* ── 프로모션 관리 ── */}
         {activeTab === "promo" && <PromoContentsPanel />}
+
+        {/* ── 전문가픽 관리 ── */}
+        {activeTab === "expertPicks" && <ExpertPicksPanel />}
       </section>
     </main>
   );
