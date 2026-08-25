@@ -13,7 +13,12 @@ export async function POST(req: NextRequest) {
     const authError = await requireAdminRequest(req);
     if (authError) return authError;
 
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    // @vercel/blob은 BLOB_READ_WRITE_TOKEN(고정 토큰)이 없으면
+    // VERCEL_OIDC_TOKEN + BLOB_STORE_ID(OIDC 인증)로 자동 폴백한다.
+    // 둘 중 하나도 없으면 미구성으로 판단해 503으로 막는다.
+    const hasStaticToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+    const hasOidcConfig = Boolean(process.env.BLOB_STORE_ID);
+    if (!hasStaticToken && !hasOidcConfig) {
       return NextResponse.json(
         { error: "Image storage is not configured on server" },
         { status: 503 },
