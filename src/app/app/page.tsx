@@ -60,12 +60,20 @@ export default async function TrendsPage() {
             다음 업데이트: {formatKST(snapshot.next_update_at_utc)} KST
           </p>
         </div>
-        <Link
-          href="/burning"
-          className="inline-flex items-center gap-1.5 rounded-full border border-red-300/25 bg-red-600/15 px-3 py-1.5 text-xs font-semibold text-red-100 hover:bg-red-500/25 transition-colors shrink-0"
-        >
-          🔥 타는중
-        </Link>
+        <div className="flex items-center gap-2 shrink-0">
+          <Link
+            href="/expert-picks"
+            className="inline-flex items-center gap-1.5 rounded-full border border-violet-300/25 bg-violet-600/15 px-3 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/25 transition-colors"
+          >
+            ✨ 전문가픽
+          </Link>
+          <Link
+            href="/burning"
+            className="inline-flex items-center gap-1.5 rounded-full border border-red-300/25 bg-red-600/15 px-3 py-1.5 text-xs font-semibold text-red-100 hover:bg-red-500/25 transition-colors"
+          >
+            🔥 타는중
+          </Link>
+        </div>
       </header>
 
       {/* Trend list */}
