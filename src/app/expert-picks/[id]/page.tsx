@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getExpertPickById } from "@/lib/db/queries";
+import { stripLeadingTitleLine } from "@/lib/expert-picks-parser";
 
 export const revalidate = 900; // ISR: 15분
 
@@ -17,7 +18,9 @@ export async function generateMetadata({
   const item = await getExpertPickById(numericId);
   if (!item || !item.enabled) return { title: "전문가픽 — Vibenow" };
 
-  const description = item.body_ko.trim().slice(0, 120);
+  const description = stripLeadingTitleLine(item.body_ko, item.title_ko)
+    .trim()
+    .slice(0, 120);
   return {
     title: `${item.title_ko} — Vibenow 전문가픽`,
     description,
@@ -90,9 +93,10 @@ export default async function ExpertPickDetailPage({
           )}
         </header>
 
-        {/* 원문 줄바꿈을 그대로 보존해 렌더링한다 — trim/정규화 금지 */}
+        {/* 원문 줄바꿈을 그대로 보존해 렌더링한다 — trim/정규화 금지.
+            (본문 첫 줄의 제목 중복은 stripLeadingTitleLine이 제거한다.) */}
         <p className="text-base text-zinc-200 leading-relaxed whitespace-pre-wrap">
-          {item.body_ko}
+          {stripLeadingTitleLine(item.body_ko, item.title_ko)}
         </p>
 
         {item.link_url && (

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseExpertPickPaste, extractLinkDomain } from "./expert-picks-parser";
+import {
+  parseExpertPickPaste,
+  extractLinkDomain,
+  stripLeadingTitleLine,
+} from "./expert-picks-parser";
 
 test("uses the first non-empty line as title, keeps full body with newlines intact", () => {
   const raw = "GPT-5.5 출시 임박\n\n오픈AI가 다음 주 발표를 예고했다.\n관련 링크: https://example.com/news?utm_source=kakao";
@@ -47,4 +51,21 @@ test("extractLinkDomain returns hostname for valid URLs and empty string for inv
   assert.equal(extractLinkDomain("https://sub.example.com/path"), "sub.example.com");
   assert.equal(extractLinkDomain("not a url"), "");
   assert.equal(extractLinkDomain(""), "");
+});
+
+test("stripLeadingTitleLine removes a body's leading line when it duplicates the title", () => {
+  const body = "제목\n\n본문 내용입니다.";
+  assert.equal(stripLeadingTitleLine(body, "제목"), "본문 내용입니다.");
+});
+
+test("stripLeadingTitleLine matches a truncated (100-char) title against the fuller first line", () => {
+  const longLine = "가".repeat(150);
+  const body = `${longLine}\n본문`;
+  const truncatedTitle = longLine.slice(0, 100);
+  assert.equal(stripLeadingTitleLine(body, truncatedTitle), "본문");
+});
+
+test("stripLeadingTitleLine leaves body untouched when the first line doesn't match the title", () => {
+  const body = "다른 문장\n본문";
+  assert.equal(stripLeadingTitleLine(body, "제목"), body);
 });

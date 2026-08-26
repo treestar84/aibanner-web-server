@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listExpertPicks } from "@/lib/db/queries";
+import { stripLeadingTitleLine } from "@/lib/expert-picks-parser";
 
 export const revalidate = 60;
 
@@ -58,7 +59,7 @@ export default async function ExpertPicksPage() {
                     {item.title_ko}
                   </h2>
                   <p className="text-sm text-zinc-400 mt-1.5 line-clamp-2 whitespace-pre-wrap">
-                    {truncate(item.body_ko, 120)}
+                    {truncate(stripLeadingTitleLine(item.body_ko, item.title_ko), 120)}
                   </p>
                   <div className="flex items-center gap-2 mt-2 text-xs text-zinc-500">
                     {item.author_label && <span>{item.author_label}</span>}
