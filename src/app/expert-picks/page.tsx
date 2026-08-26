@@ -15,8 +15,12 @@ function truncate(text: string, maxLength: number): string {
   return `${trimmed.slice(0, maxLength)}…`;
 }
 
+// 앱(둘러보기)은 최신 15개만 보여주지만, 웹은 과거 글도 찾아볼 수 있도록
+// 더 넉넉하게 최대 50개까지 보여준다.
+const WEB_LIST_LIMIT = 50;
+
 export default async function ExpertPicksPage() {
-  const items = await listExpertPicks(true);
+  const items = await listExpertPicks(true, WEB_LIST_LIMIT);
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">

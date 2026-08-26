@@ -44,6 +44,16 @@ test("insertExpertPick never writes to body_ko_raw from a later update", () => {
   assert.doesNotMatch(updateFnMatch![0], /body_ko_raw\s*=/);
 });
 
+test("listExpertPicks supports an optional LIMIT so public callers can cap unbounded growth", () => {
+  const fn = queriesSource.match(
+    /export async function listExpertPicks[\s\S]*?\n}\n/,
+  );
+  assert.ok(fn, "listExpertPicks function not found");
+  assert.match(fn![0], /LIMIT \$\{limit\}/);
+  // limit이 없을 때 여전히 무제한 조회(관리자 목록)를 지원해야 한다.
+  assert.match(fn![0], /: await sql`/);
+});
+
 test("claimExpertPickViewEvent uses ON CONFLICT DO NOTHING for dedup", () => {
   assert.match(
     queriesSource,

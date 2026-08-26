@@ -1963,19 +1963,35 @@ export interface ExpertPick {
   version: number;
 }
 
+// limit을 생략하면(관리자 목록 등) 전부 반환한다. 공개 목록은 항상 limit을
+// 넘겨 무한정 누적되는 과거 글이 그대로 다 내려가지 않도록 한다.
 export async function listExpertPicks(
   enabledOnly = false,
+  limit?: number,
 ): Promise<ExpertPick[]> {
   const rows = enabledOnly
-    ? await sql`
-        SELECT * FROM expert_picks
-        WHERE enabled = TRUE
-        ORDER BY sort_order DESC, created_at DESC
-      `
-    : await sql`
-        SELECT * FROM expert_picks
-        ORDER BY sort_order DESC, created_at DESC
-      `;
+    ? limit
+      ? await sql`
+          SELECT * FROM expert_picks
+          WHERE enabled = TRUE
+          ORDER BY sort_order DESC, created_at DESC
+          LIMIT ${limit}
+        `
+      : await sql`
+          SELECT * FROM expert_picks
+          WHERE enabled = TRUE
+          ORDER BY sort_order DESC, created_at DESC
+        `
+    : limit
+      ? await sql`
+          SELECT * FROM expert_picks
+          ORDER BY sort_order DESC, created_at DESC
+          LIMIT ${limit}
+        `
+      : await sql`
+          SELECT * FROM expert_picks
+          ORDER BY sort_order DESC, created_at DESC
+        `;
   return rows as ExpertPick[];
 }
 
