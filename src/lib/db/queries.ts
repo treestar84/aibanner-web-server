@@ -1477,6 +1477,27 @@ export async function deleteYoutubeVideosOlderThan(
   return rows.length;
 }
 
+export interface DeletedExpertPick {
+  id: number;
+  image_url: string;
+}
+
+// image_url을 같이 반환하는 이유: 호출부(retention.ts)가 행을 지운 뒤
+// 같은 이미지를 Vercel Blob에서도 지워야 하기 때문 — DB 삭제와 Blob 삭제는
+// 원자적일 수 없으므로, 먼저 행을 지우고 반환된 URL로 Blob을 정리한다
+// (반대 순서면 DB 삭제가 실패했을 때 이미지만 먼저 사라지는 게 더 위험하다).
+export async function deleteExpertPicksOlderThan(
+  days: number,
+): Promise<DeletedExpertPick[]> {
+  const rows = (await sql`
+    DELETE FROM expert_picks
+    WHERE created_at < NOW() - (${days} * INTERVAL '1 day')
+    RETURNING id, image_url
+  `) as DeletedExpertPick[];
+
+  return rows;
+}
+
 export async function applyRetentionPolicy(
   detailedDays: number,
   aggregateDays: number,

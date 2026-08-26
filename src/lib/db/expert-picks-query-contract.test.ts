@@ -54,6 +54,17 @@ test("listExpertPicks supports an optional LIMIT so public callers can cap unbou
   assert.match(fn![0], /: await sql`/);
 });
 
+test("deleteExpertPicksOlderThan deletes by created_at and returns image_url for blob cleanup", () => {
+  const fn = queriesSource.match(
+    /export async function deleteExpertPicksOlderThan[\s\S]*?\n}\n/,
+  );
+  assert.ok(fn, "deleteExpertPicksOlderThan function not found");
+  assert.match(fn![0], /DELETE FROM expert_picks/);
+  assert.match(fn![0], /created_at < NOW\(\) - \(\$\{days\} \* INTERVAL '1 day'\)/);
+  // 삭제한 행의 image_url을 못 받으면 호출부가 Blob 이미지를 못 지운다.
+  assert.match(fn![0], /RETURNING id, image_url/);
+});
+
 test("claimExpertPickViewEvent uses ON CONFLICT DO NOTHING for dedup", () => {
   assert.match(
     queriesSource,

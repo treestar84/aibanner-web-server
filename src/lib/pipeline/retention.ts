@@ -1,4 +1,9 @@
-import { applyRetentionPolicy, type RetentionCounts } from "@/lib/db/queries";
+import { del } from "@vercel/blob";
+import {
+  applyRetentionPolicy,
+  deleteExpertPicksOlderThan,
+  type RetentionCounts,
+} from "@/lib/db/queries";
 
 export interface RetentionPolicy {
   detailedDays: number;
@@ -6,10 +11,18 @@ export interface RetentionPolicy {
   keywordViewLifecycleDays: number;
   naverSourceDays: number;
   youtubeVideoDays: number;
+  expertPicksDays: number;
+}
+
+export interface ExpertPicksRetentionResult {
+  deletedExpertPicks: number;
+  deletedExpertPickImages: number;
+  failedExpertPickImageDeletes: number;
 }
 
 export interface RetentionRunResult extends RetentionCounts {
   policy: RetentionPolicy;
+  expertPicks: ExpertPicksRetentionResult;
 }
 
 const DEFAULT_DETAILED_DAYS = 90;
@@ -19,6 +32,9 @@ const DEFAULT_KEYWORD_VIEW_LIFECYCLE_DAYS = 3;
 const DEFAULT_NAVER_SOURCE_DAYS = 7;
 // YouTube Data API 이용 정책상 응답 데이터 캐싱은 30일로 제한
 const DEFAULT_YOUTUBE_VIDEO_DAYS = 30;
+// 전문가픽 글+이미지 보관 기간. 공개 목록은 앱 15개/웹 50개로만 노출되므로
+// 그 창 밖으로 밀려난 지 한참 지난 글은 DB/Blob에만 남아 비용을 만든다.
+const DEFAULT_EXPERT_PICKS_DAYS = 90;
 
 function parsePositiveIntEnv(
   value: string | undefined,
@@ -65,6 +81,12 @@ export function resolveRetentionPolicy(): RetentionPolicy {
     1,
     30
   );
+  const expertPicksDays = parsePositiveIntEnv(
+    process.env.RETENTION_EXPERT_PICKS_DAYS,
+    DEFAULT_EXPERT_PICKS_DAYS,
+    7,
+    3650
+  );
 
   return {
     detailedDays,
@@ -72,6 +94,40 @@ export function resolveRetentionPolicy(): RetentionPolicy {
     keywordViewLifecycleDays,
     naverSourceDays,
     youtubeVideoDays,
+    expertPicksDays,
+  };
+}
+
+// DB 행 삭제와 Blob 이미지 삭제는 원자적으로 묶을 수 없다. 먼저 행을 지우고
+// (RETURNING으로 지운 행의 image_url을 확보한 뒤) Blob을 정리하는 순서를
+// 택한 이유: 반대로 하면 Blob 삭제 후 DB 삭제가 실패할 경우 화면에는 계속
+// 노출되는 글의 이미지가 깨지는, 더 눈에 띄는 실패가 된다. 이 순서라면
+// 최악의 경우도 "글은 지워졌는데 이미지가 스토리지에 남는" 조용한 실패다.
+async function cleanupExpiredExpertPicks(
+  days: number
+): Promise<ExpertPicksRetentionResult> {
+  const deleted = await deleteExpertPicksOlderThan(days);
+
+  let deletedImages = 0;
+  let failedImageDeletes = 0;
+  for (const pick of deleted) {
+    if (!pick.image_url) continue;
+    try {
+      await del(pick.image_url);
+      deletedImages += 1;
+    } catch (err) {
+      failedImageDeletes += 1;
+      console.error(
+        `[retention/expert-picks] failed to delete blob for pick ${pick.id}`,
+        err
+      );
+    }
+  }
+
+  return {
+    deletedExpertPicks: deleted.length,
+    deletedExpertPickImages: deletedImages,
+    failedExpertPickImageDeletes: failedImageDeletes,
   };
 }
 
@@ -84,5 +140,6 @@ export async function runRetentionPolicy(): Promise<RetentionRunResult> {
     policy.naverSourceDays,
     policy.youtubeVideoDays
   );
-  return { ...counts, policy };
+  const expertPicks = await cleanupExpiredExpertPicks(policy.expertPicksDays);
+  return { ...counts, policy, expertPicks };
 }
