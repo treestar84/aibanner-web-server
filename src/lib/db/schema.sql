@@ -557,3 +557,28 @@ CREATE TABLE IF NOT EXISTS analytics_client_daily (
   app_version TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (day, client_id)
 );
+
+-- ============================================================
+-- content_likes / content_like_events: 콘텐츠 타입 공용 좋아요 집계
+-- (실시간/불타는 키워드/핫토픽/전문가픽 — 4개 타입이 이 두 테이블을 공유한다)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS content_likes (
+  content_type TEXT        NOT NULL,
+  content_id   TEXT        NOT NULL,
+  like_count   INTEGER     NOT NULL DEFAULT 0,
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (content_type, content_id)
+);
+
+-- 익명화된 좋아요 중복 방지 토큰(IP+UA 해시). IP/UA 원문은 저장하지 않는다.
+-- 한 기기가 같은 콘텐츠를 여러 번 토글해도 집계엔 항상 최대 +1로만 반영된다.
+CREATE TABLE IF NOT EXISTS content_like_events (
+  content_type TEXT        NOT NULL,
+  content_id   TEXT        NOT NULL,
+  viewer_hash  TEXT        NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (content_type, content_id, viewer_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_like_events_created_at
+  ON content_like_events(created_at);

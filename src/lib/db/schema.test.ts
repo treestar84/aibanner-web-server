@@ -28,3 +28,20 @@ test("schema defines expert_pick_view_events dedup table with composite PK", () 
     /PRIMARY KEY \(expert_pick_id, viewer_hash, bucket_start\)/,
   );
 });
+
+test("schema defines content_likes with a composite (content_type, content_id) primary key", () => {
+  assert.match(schemaSource, /CREATE TABLE IF NOT EXISTS content_likes/);
+  assert.match(schemaSource, /like_count\s+INTEGER\s+NOT NULL DEFAULT 0/);
+  assert.match(
+    schemaSource,
+    /PRIMARY KEY \(content_type, content_id\)/,
+  );
+});
+
+test("schema defines content_like_events dedup table with composite PK including viewer_hash", () => {
+  assert.match(schemaSource, /CREATE TABLE IF NOT EXISTS content_like_events/);
+  assert.match(
+    schemaSource,
+    /PRIMARY KEY \(content_type, content_id, viewer_hash\)/,
+  );
+});

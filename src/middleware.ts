@@ -27,6 +27,8 @@ const RATE_LIMITS: [prefix: string, rpm: number][] = [
   ["/api/v1/trends", 30],     // 트렌드 목록
   ["/api/v1/expert-picks/views", 15], // 조회수 집계 — keywords/views와 동일한 보호 수준
   ["/api/v1/expert-picks", 60],       // 전문가픽 목록/상세
+  ["/api/v1/content-likes/counts", 60], // 좋아요 집계 배치 조회 — 목록 로드 시 사용 가능하도록 넉넉하게
+  ["/api/v1/content-likes", 20],        // 좋아요 토글 — 탭 1회당 요청 1개뿐이라 타이트하게
   ["/api/v1/keywords", 60],   // 키워드 상세 (여러 개 탐색 고려)
   ["/api/v1/", 100],          // 기타 v1 엔드포인트
   ["/api/mcp", 60],           // MCP 서버 — PlayMCP 등 게이트웨이 대비, env MCP_RATE_LIMIT_RPM으로 조정

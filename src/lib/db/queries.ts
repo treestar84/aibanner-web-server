@@ -2140,3 +2140,97 @@ export async function claimExpertPickViewEvent(
   `) as { expert_pick_id: number }[];
   return rows.length > 0;
 }
+
+// ─── Content Likes (콘텐츠 타입 공용 좋아요 집계) ───────────────────────────────
+// 실시간/불타는 키워드/핫토픽/전문가픽 4개 타입이 content_type 컬럼으로만
+// 구분되는 이 테이블 두 개를 공유한다. 타입별로 스키마를 늘리지 않기 위함.
+
+export interface ContentLikeResult {
+  liked: boolean;
+  likeCount: number;
+  // 이미 같은 상태였던 요청(중복 좋아요/중복 취소)은 DB를 건드리지 않으므로
+  // false — 호출부가 "실제로 집계가 바뀌었는지"를 구분할 수 있게 한다.
+  changed: boolean;
+}
+
+export async function getContentLikeCount(
+  contentType: string,
+  contentId: string,
+): Promise<number> {
+  const rows = (await sql`
+    SELECT like_count FROM content_likes
+    WHERE content_type = ${contentType} AND content_id = ${contentId}
+  `) as { like_count: number }[];
+  return rows[0]?.like_count ?? 0;
+}
+
+export async function getContentLikeCounts(
+  contentType: string,
+  contentIds: string[],
+): Promise<Record<string, number>> {
+  if (contentIds.length === 0) return {};
+  const rows = (await sql`
+    SELECT content_id, like_count FROM content_likes
+    WHERE content_type = ${contentType} AND content_id = ANY(${contentIds})
+  `) as { content_id: string; like_count: number }[];
+
+  const result: Record<string, number> = {};
+  for (const row of rows) result[row.content_id] = row.like_count;
+  return result;
+}
+
+export async function likeContent(
+  contentType: string,
+  contentId: string,
+  viewerHash: string,
+): Promise<ContentLikeResult> {
+  const claimed = (await sql`
+    INSERT INTO content_like_events (content_type, content_id, viewer_hash)
+    VALUES (${contentType}, ${contentId}, ${viewerHash})
+    ON CONFLICT (content_type, content_id, viewer_hash) DO NOTHING
+    RETURNING content_type
+  `) as { content_type: string }[];
+  const changed = claimed.length > 0;
+
+  if (changed) {
+    await sql`
+      INSERT INTO content_likes (content_type, content_id, like_count, updated_at)
+      VALUES (${contentType}, ${contentId}, 1, NOW())
+      ON CONFLICT (content_type, content_id) DO UPDATE
+      SET like_count = content_likes.like_count + 1,
+          updated_at = NOW()
+    `;
+  }
+
+  const likeCount = await getContentLikeCount(contentType, contentId);
+  return { liked: true, likeCount, changed };
+}
+
+export async function unlikeContent(
+  contentType: string,
+  contentId: string,
+  viewerHash: string,
+): Promise<ContentLikeResult> {
+  const claimed = (await sql`
+    DELETE FROM content_like_events
+    WHERE content_type = ${contentType}
+      AND content_id = ${contentId}
+      AND viewer_hash = ${viewerHash}
+    RETURNING content_type
+  `) as { content_type: string }[];
+  const changed = claimed.length > 0;
+
+  if (changed) {
+    // like_count가 이미 0인데 다른 기기의 unlike 이벤트가 뒤늦게 도착하는
+    // 경쟁 상황에서도 음수로 내려가지 않도록 GREATEST로 하한을 둔다.
+    await sql`
+      UPDATE content_likes
+      SET like_count = GREATEST(like_count - 1, 0),
+          updated_at = NOW()
+      WHERE content_type = ${contentType} AND content_id = ${contentId}
+    `;
+  }
+
+  const likeCount = await getContentLikeCount(contentType, contentId);
+  return { liked: false, likeCount, changed };
+}

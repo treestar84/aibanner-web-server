@@ -8,3 +8,28 @@ test("expert-picks views endpoint has its own tighter rate limit than the genera
   assert.match(middlewareSource, /\["\/api\/v1\/expert-picks\/views",\s*\d+\]/);
   assert.match(middlewareSource, /\["\/api\/v1\/expert-picks",\s*\d+\]/);
 });
+
+test("content-likes toggle endpoint is rate-limited tighter than its batch counts read", () => {
+  const countsMatch = middlewareSource.match(
+    /\["\/api\/v1\/content-likes\/counts",\s*(\d+)\]/,
+  );
+  const toggleMatch = middlewareSource.match(
+    /\["\/api\/v1\/content-likes",\s*(\d+)\]/,
+  );
+  assert.ok(countsMatch, "content-likes/counts rate limit entry not found");
+  assert.ok(toggleMatch, "content-likes rate limit entry not found");
+  const countsRpm = Number(countsMatch![1]);
+  const toggleRpm = Number(toggleMatch![1]);
+  assert.ok(
+    toggleRpm < countsRpm,
+    "a single-tap toggle endpoint should be capped tighter than a batch read",
+  );
+
+  // 더 구체적인 prefix(counts)가 배열에서 더 앞에 있어야 한다 — 뒤에 있으면
+  // startsWith 매칭에서 "/api/v1/content-likes"에 먼저 걸려 counts 전용
+  // 제한이 절대 적용되지 않는다.
+  const countsIndex = middlewareSource.indexOf('"/api/v1/content-likes/counts"');
+  const toggleIndex = middlewareSource.indexOf('"/api/v1/content-likes"');
+  assert.ok(countsIndex >= 0 && toggleIndex >= 0);
+  assert.ok(countsIndex < toggleIndex);
+});
