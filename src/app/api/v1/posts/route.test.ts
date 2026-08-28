@@ -22,3 +22,9 @@ test("posts are authenticated via requirePostToken before any DB write", () => {
   assert.match(routeSource, /requirePostToken\(req\)/);
   assert.match(routeSource, /auth instanceof NextResponse/);
 });
+
+test("cooldown-free tiers (3-5) re-check today's post count against perDay before insert, since canPostNow only compares timestamps", () => {
+  assert.match(routeSource, /freq\.cooldownDays === 0 && freq\.perDay > 0/);
+  assert.match(routeSource, /SELECT COUNT\(\*\)::int AS cnt FROM expert_picks/);
+  assert.match(routeSource, /todayCount >= freq\.perDay/);
+});

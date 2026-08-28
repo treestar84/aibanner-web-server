@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db/client";
-import { computeTier } from "@/lib/tier";
+import { computeTier, POST_FREQUENCY_BY_TIER } from "@/lib/tier";
 import { canPostNow } from "@/lib/post-gate";
 import { requirePostToken } from "@/lib/post-token-auth";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
+
+// points-ledger.ts의 kstDayBucket과 같은 이유: 서버는 UTC로 동작하므로 "오늘"을
+// KST 기준으로 판정하려면 KST 자정에 해당하는 UTC 시각을 직접 계산해야 한다.
+function kstMidnightUtc(now: Date): Date {
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const kstMidnightMs =
+    Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()) - 9 * 60 * 60 * 1000;
+  return new Date(kstMidnightMs);
+}
 
 export async function POST(req: NextRequest) {
   const auth = await requirePostToken(req);
@@ -19,6 +28,26 @@ export async function POST(req: NextRequest) {
       { error: "Posting not allowed yet", nextAllowedAt: gate.nextAllowedAt ?? null },
       { status: 429 },
     );
+  }
+
+  // canPostNow는 쿨다운 없는 등급(3~5)에 대해 시각 비교만 하고 오늘자 개수는 보지 않는다.
+  // 여기서 오늘(KST) expert_picks INSERT 수를 다시 세어 perDay 상한을 강제한다.
+  const freq = POST_FREQUENCY_BY_TIER[tier];
+  if (freq.cooldownDays === 0 && freq.perDay > 0) {
+    const todayStart = kstMidnightUtc(new Date());
+    const todayCountRows = await sql`
+      SELECT COUNT(*)::int AS cnt FROM expert_picks
+      WHERE author_device_id = ${deviceId}
+        AND author_type = 'user'
+        AND created_at >= ${todayStart.toISOString()}
+    `;
+    const todayCount = todayCountRows[0]?.cnt ?? 0;
+    if (todayCount >= freq.perDay) {
+      return NextResponse.json(
+        { error: "Daily post limit reached for your tier", perDay: freq.perDay },
+        { status: 429 },
+      );
+    }
   }
 
   const body = await req.json().catch(() => null);
