@@ -56,7 +56,9 @@ export function parseServiceAccountKey(
 let cachedClient: JWT | null = null;
 let cachedRawKey: string | null = null;
 
-async function getPlayIntegrityAccessToken(rawKey: string): Promise<string> {
+async function getPlayIntegrityAccessToken(
+  rawKey: string | undefined,
+): Promise<string> {
   if (!cachedClient || cachedRawKey !== rawKey) {
     const credentials = parseServiceAccountKey(rawKey);
     cachedClient = new JWT({
@@ -64,7 +66,7 @@ async function getPlayIntegrityAccessToken(rawKey: string): Promise<string> {
       key: credentials.private_key,
       scopes: [PLAY_INTEGRITY_SCOPE],
     });
-    cachedRawKey = rawKey;
+    cachedRawKey = rawKey ?? null;
   }
 
   const { token } = await cachedClient.getAccessToken();
