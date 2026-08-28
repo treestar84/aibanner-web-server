@@ -634,3 +634,6 @@ CREATE TABLE IF NOT EXISTS moderation_log (
   actor       TEXT NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Task 3 point-wiring fix: post_survived_24h 포인트 중복 지급 방지 플래그
+ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS point_awarded_survival BOOLEAN NOT NULL DEFAULT FALSE;

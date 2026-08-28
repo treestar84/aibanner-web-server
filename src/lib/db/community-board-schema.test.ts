@@ -17,3 +17,10 @@ test("device_principals stores only a token hash, never the raw postToken", () =
 test("post_reports enforces one report per device per post", () => {
   assert.match(schema, /UNIQUE \(post_id, reporter_device_id\)/);
 });
+
+test("expert_picks gains point_awarded_survival flag for idempotent survival-point grants", () => {
+  assert.match(
+    schema,
+    /ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS point_awarded_survival BOOLEAN NOT NULL DEFAULT FALSE/
+  );
+});
