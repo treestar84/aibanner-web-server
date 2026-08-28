@@ -2,8 +2,9 @@ import { sql } from "../db/client";
 import { awardPoints } from "../points-ledger";
 
 // 최근 30일 활동(게시/좋아요/신고 등 point_ledger 기록)이 없고, 등급을
-// 얻은 지 2주가 지난 기기를 한 단계 강등한다. cron_realtime 워크플로에
-// 이 함수를 별도 스텝으로 추가 호출한다(Task 목록 밖, 운영 설정).
+// 얻은 지 2주가 지난 기기를 한 단계 강등한다. 호출부는
+// src/app/api/cron/snapshot/route.ts — retention과 같은 하루 1회
+// (UTC 00:10 = KST 09:10) 패스에서만 돈다.
 export async function runTierDemotionBatch(now: Date = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - 30 * 86_400_000).toISOString();
   const result = await sql`

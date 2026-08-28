@@ -6,6 +6,10 @@ import {
   type RetentionRunResult,
 } from "@/lib/pipeline/retention";
 import { collectAndStoreYoutubeRecommendations, cleanOldYoutubeVideos } from "@/lib/pipeline/youtube_recommend_source";
+import {
+  runTierDemotionBatch,
+  runPostSurvivalPointsBatch,
+} from "@/lib/pipeline/tier-demotion";
 import { pruneTelemetry } from "@/lib/db/telemetry";
 
 export const runtime = "nodejs";
@@ -36,6 +40,34 @@ export async function GET(req: NextRequest) {
   } catch (ytErr) {
     youtubeError = String(ytErr);
     console.error("[cron/youtube]", ytErr);
+  }
+
+  // 커뮤니티 게시판 주기 배치.
+  // - post_survival: 매 크론 실행마다 돈다. 글은 24시간이 지나는 시점이 제각각이라
+  //   하루 1회만 돌리면 포인트 지급이 최대 하루 늦어진다. expert_picks의
+  //   point_awarded_survival 플래그로 멱등하므로 자주 돌아도 중복 지급은 없다.
+  // - tier_demotion: 30일 무활동 + 14일 경과라는 느린 규칙이라 retention과
+  //   같은 하루 1회(UTC 00:10) 패스에서만 돈다.
+  // 두 배치 모두 스냅샷 파이프라인과 독립적이므로 실패해도 크론 전체를 죽이지
+  // 않고 에러만 응답에 실어 보낸다(youtube 스텝과 같은 방식).
+  let postSurvivalCount: number | null = null;
+  let postSurvivalError: string | null = null;
+  try {
+    postSurvivalCount = await runPostSurvivalPointsBatch();
+  } catch (batchErr) {
+    postSurvivalError = String(batchErr);
+    console.error("[cron/post-survival-points]", batchErr);
+  }
+
+  let tierDemotionCount: number | null = null;
+  let tierDemotionError: string | null = null;
+  if (runRetention) {
+    try {
+      tierDemotionCount = await runTierDemotionBatch();
+    } catch (batchErr) {
+      tierDemotionError = String(batchErr);
+      console.error("[cron/tier-demotion]", batchErr);
+    }
   }
 
   try {
@@ -71,6 +103,10 @@ export async function GET(req: NextRequest) {
       retentionError,
       youtube: youtubeResult,
       youtubeError,
+      postSurvivalCount,
+      postSurvivalError,
+      tierDemotionCount,
+      tierDemotionError,
       durationMs,
     });
   } catch (err) {
