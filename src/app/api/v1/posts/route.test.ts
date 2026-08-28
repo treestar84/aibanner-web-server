@@ -15,7 +15,8 @@ test("posts endpoint caps body length to prevent long-form abuse of a title-less
 
 test("user posts are stored with author_type='user' and the author's device id, never a title", () => {
   assert.match(routeSource, /'user', \$\{deviceId\}/);
-  assert.match(routeSource, /VALUES \(NULL,/);
+  // 삽입 행의 첫 컬럼(title_ko)은 항상 NULL이다 — 사용자 글은 제목이 없다.
+  assert.match(routeSource, /SELECT\s*\n\s*NULL, \$\{bodyKo\}, \$\{bodyKo\}, 'user'/);
 });
 
 test("posts are authenticated via requirePostToken before any DB write", () => {
@@ -23,10 +24,42 @@ test("posts are authenticated via requirePostToken before any DB write", () => {
   assert.match(routeSource, /auth instanceof NextResponse/);
 });
 
-test("cooldown-free tiers (3-5) re-check today's post count against perDay before insert, since canPostNow only compares timestamps", () => {
-  assert.match(routeSource, /freq\.cooldownDays === 0 && freq\.perDay > 0/);
-  assert.match(routeSource, /SELECT COUNT\(\*\)::int AS cnt FROM expert_picks/);
-  assert.match(routeSource, /todayCount >= freq\.perDay/);
+// I6: 게시 빈도 게이트도 check-then-insert였다. canPostNow는 시각 비교만 하고
+// 오늘자 개수는 보지 않으므로, 상한 재확인이 반드시 삽입과 같은 문장에서
+// 일어나야 한다(별도 왕복이면 동시 요청 둘 다 통과한다).
+test("the perDay count and the cooldown are re-checked inside the same statement as the insert", () => {
+  const postFn = routeSource.match(/export async function POST[\s\S]*?\n}\n/)![0];
+  const sqlCalls = postFn.match(/await sql`/g) ?? [];
+  assert.equal(
+    sqlCalls.length,
+    1,
+    "a separate COUNT round-trip before the insert reopens the race",
+  );
+  assert.match(postFn, /WITH gate AS \(/);
+  assert.match(postFn, /SELECT COUNT\(\*\)::int FROM expert_picks/);
+  assert.match(postFn, /WHERE g\.today_count < \$\{freq\.perDay\}::int/);
+  assert.match(postFn, /g\.last_post_at <= NOW\(\) - \(\$\{freq\.cooldownDays\}::int \* INTERVAL '1 day'\)/);
+});
+
+test("last_post_at is only bumped when the gated insert actually happened", () => {
+  const postFn = routeSource.match(/export async function POST[\s\S]*?\n}\n/)![0];
+  assert.match(
+    postFn,
+    /UPDATE device_principals SET last_post_at = NOW\(\)\s*\n\s*WHERE device_id = \$\{deviceId\} AND EXISTS \(SELECT 1 FROM ins\)/,
+  );
+});
+
+test("a gated-out insert returns 429 rather than reporting a successful post", () => {
+  assert.match(routeSource, /if \(insertedId === null\)/);
+  assert.match(routeSource, /Daily post limit reached for your tier/);
+});
+
+test("canPostNow still runs first so the friendly nextAllowedAt response is preserved", () => {
+  const postFn = routeSource.match(/export async function POST[\s\S]*?\n}\n/)![0];
+  const gateIndex = postFn.indexOf("canPostNow(tier, lastPostAt)");
+  const sqlIndex = postFn.indexOf("await sql`");
+  assert.ok(gateIndex > 0 && sqlIndex > 0 && gateIndex < sqlIndex);
+  assert.match(postFn, /nextAllowedAt: gate\.nextAllowedAt \?\? null/);
 });
 
 test("feed GET only returns visible user posts, never editor picks or hidden/removed posts", () => {
@@ -40,9 +73,36 @@ test("feed GET joins device_principals for a live nickname instead of reading a 
 });
 
 test("feed GET paginates by cursor on descending id", () => {
-  assert.match(routeSource, /cursorId = cursor \? Number\.parseInt\(cursor, 10\) : null/);
   assert.match(routeSource, /ep\.id < \$\{cursorId\}::int/);
   assert.match(routeSource, /ORDER BY ep\.id DESC/);
+});
+
+// I7: 두 핸들러 모두 이 저장소 표준인 바깥쪽 try/catch가 없었다.
+test("both handlers are wrapped in the repo's standard outer try/catch", () => {
+  assert.match(routeSource, /export async function POST\(req: NextRequest\) \{\s*\n\s*try \{/);
+  assert.match(routeSource, /export async function GET\(req: NextRequest\) \{\s*\n\s*try \{/);
+  assert.match(routeSource, /console\.error\("\[\/api\/v1\/posts\]\[POST\]", err\)/);
+  assert.match(routeSource, /console\.error\("\[\/api\/v1\/posts\]\[GET\]", err\)/);
+  const handlers = routeSource.match(/return NextResponse\.json\(\{ error: message \}, \{ status: 500 \}\);/g) ?? [];
+  assert.equal(handlers.length, 2, "each handler needs its own 500 fallback");
+});
+
+// ?cursor=abc는 NaN이 되어 그대로 쿼리로 나갔다. try/catch로 덮지 말고
+// 명시적으로 400을 돌려준다.
+test("a non-numeric cursor is rejected with 400, not passed to the DB as NaN", () => {
+  assert.match(routeSource, /const parsed = Number\.parseInt\(cursor, 10\);/);
+  assert.match(routeSource, /if \(!Number\.isFinite\(parsed\)\) \{/);
+  assert.match(routeSource, /cursor must be an integer/);
+  const getFn = routeSource.match(/export async function GET[\s\S]*?\n}\n/)![0];
+  const validationIndex = getFn.indexOf("Number.isFinite(parsed)");
+  const queryIndex = getFn.indexOf("await sql`");
+  assert.ok(validationIndex > 0 && queryIndex > 0);
+  assert.ok(validationIndex < queryIndex, "cursor must be validated before the query runs");
+});
+
+test("an absent cursor still means 'first page', not a 400", () => {
+  assert.match(routeSource, /if \(cursor !== null && cursor !== ""\)/);
+  assert.match(routeSource, /let cursorId: number \| null = null;/);
 });
 
 // I5: 업로드 라우트의 MIME/용량/인증 검사를 우회하는 임의 imageUrl 차단

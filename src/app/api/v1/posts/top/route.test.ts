@@ -22,3 +22,11 @@ test("top endpoint caps limit at 10 and revalidates every 60s", () => {
   assert.match(routeSource, /Math\.min\(Number\.parseInt\(req\.nextUrl\.searchParams\.get\("limit"\) \?\? "10", 10\) \|\| 10, 10\)/);
   assert.match(routeSource, /export const revalidate = 60;/);
 });
+
+// I7: 이 라우트도 저장소 표준 바깥쪽 try/catch가 없어 DB 오류가 그대로
+// 프레임워크 기본 예외로 새어 나갔다.
+test("the handler is wrapped in the repo's standard outer try/catch", () => {
+  assert.match(routeSource, /export async function GET\(req: NextRequest\) \{\s*\n\s*try \{/);
+  assert.match(routeSource, /console\.error\("\[\/api\/v1\/posts\/top\]\[GET\]", err\)/);
+  assert.match(routeSource, /return NextResponse\.json\(\{ error: message \}, \{ status: 500 \}\);/);
+});
