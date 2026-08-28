@@ -60,3 +60,28 @@ test("posts top endpoint comes before posts general endpoint in RATE_LIMITS arra
   assert.ok(topIndex >= 0 && postsIndex >= 0);
   assert.ok(topIndex < postsIndex, "posts/top must appear before posts in the array");
 });
+
+test("posts upload-image endpoint is rate-limited tighter than general posts endpoint and comes first in RATE_LIMITS array", () => {
+  const uploadMatch = middlewareSource.match(
+    /\["\/api\/v1\/posts\/upload-image",\s*(\d+)\]/,
+  );
+  const postsMatch = middlewareSource.match(
+    /\["\/api\/v1\/posts",\s*(\d+)\]/,
+  );
+  assert.ok(uploadMatch, "posts/upload-image rate limit entry not found");
+  assert.ok(postsMatch, "posts rate limit entry not found");
+  const uploadRpm = Number(uploadMatch![1]);
+  const postsRpm = Number(postsMatch![1]);
+  assert.ok(
+    uploadRpm < postsRpm,
+    "image upload endpoint should be capped tighter than general posts endpoint",
+  );
+
+  // 더 구체적인 prefix(posts/upload-image)가 배열에서 더 앞에 있어야 한다 — 뒤에 있으면
+  // startsWith 매칭에서 "/api/v1/posts"에 먼저 걸려 upload-image 전용
+  // 제한이 절대 적용되지 않는다.
+  const uploadIndex = middlewareSource.indexOf('"/api/v1/posts/upload-image"');
+  const postsIndex = middlewareSource.indexOf('"/api/v1/posts"');
+  assert.ok(uploadIndex >= 0 && postsIndex >= 0);
+  assert.ok(uploadIndex < postsIndex, "posts/upload-image must appear before posts in the array");
+});
