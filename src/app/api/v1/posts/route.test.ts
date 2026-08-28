@@ -28,3 +28,19 @@ test("cooldown-free tiers (3-5) re-check today's post count against perDay befor
   assert.match(routeSource, /SELECT COUNT\(\*\)::int AS cnt FROM expert_picks/);
   assert.match(routeSource, /todayCount >= freq\.perDay/);
 });
+
+test("feed GET only returns visible user posts, never editor picks or hidden/removed posts", () => {
+  assert.match(routeSource, /export async function GET\(req: NextRequest\)/);
+  assert.match(routeSource, /ep\.author_type = 'user' AND ep\.status = 'visible'/);
+});
+
+test("feed GET joins device_principals for a live nickname instead of reading a stored column", () => {
+  assert.match(routeSource, /JOIN device_principals dp ON dp\.device_id = ep\.author_device_id/);
+  assert.match(routeSource, /dp\.nickname AS author_nickname/);
+});
+
+test("feed GET paginates by cursor on descending id", () => {
+  assert.match(routeSource, /cursorId = cursor \? Number\.parseInt\(cursor, 10\) : null/);
+  assert.match(routeSource, /ep\.id < \$\{cursorId\}::int/);
+  assert.match(routeSource, /ORDER BY ep\.id DESC/);
+});

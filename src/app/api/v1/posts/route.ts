@@ -69,3 +69,19 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true, id: inserted[0].id, nickname });
 }
+
+export async function GET(req: NextRequest) {
+  const cursor = req.nextUrl.searchParams.get("cursor");
+  const cursorId = cursor ? Number.parseInt(cursor, 10) : null;
+  const rows = await sql`
+    SELECT ep.id, ep.body_ko AS body, ep.image_url, ep.link_url, ep.link_domain,
+           dp.nickname AS author_nickname, ep.created_at
+    FROM expert_picks ep
+    JOIN device_principals dp ON dp.device_id = ep.author_device_id
+    WHERE ep.author_type = 'user' AND ep.status = 'visible'
+      AND (${cursorId}::int IS NULL OR ep.id < ${cursorId}::int)
+    ORDER BY ep.id DESC
+    LIMIT 20
+  `;
+  return NextResponse.json({ items: rows });
+}
