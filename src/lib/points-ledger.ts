@@ -25,40 +25,63 @@ export async function awardPoints(
   if (!rule) throw new Error(`Unknown point action: ${action}`);
   const dayBucket = kstDayBucket(now);
 
-  // 오늘 이미 이 액션으로 몇 번 적립했는지 카운트
-  const countRows = await sql`
-    SELECT COUNT(*)::int AS cnt FROM point_ledger
-    WHERE device_id = ${deviceId} AND action = ${action} AND day_bucket = ${dayBucket}
-  `;
-  const actionCountToday = countRows[0]?.cnt ?? 0;
-  if (actionCountToday >= rule.dailyCountCap) {
-    return { awarded: 0, newTotal: await getPointsTotal(deviceId) };
-  }
+  // ── 경합 방지 설계 ─────────────────────────────────────────────────────
+  // 예전 구현은 SELECT COUNT → SELECT SUM → INSERT를 세 번의 왕복으로 나눠서
+  // 했다. 두 요청이 동시에 들어오면 둘 다 "아직 상한 안 찼다"를 읽고 둘 다
+  // INSERT해서 일일 상한을 넘길 수 있었다.
+  //
+  // @neondatabase/serverless의 sql.transaction()은 **non-interactive**다:
+  // 쿼리 배열을 한 번에 보내는 방식이라 앞 쿼리 결과를 보고 뒤 쿼리를 바꿀 수
+  // 없어서, check-then-insert를 그대로 트랜잭션으로 감쌀 수 없다. 그래서
+  // 카운트·합산·삽입·잔액갱신을 CTE 하나로 묶어 단일 왕복 원자 문장으로
+  // 바꿨다. 이렇게 하면 왕복 사이의 긴 경합 창은 사라진다.
+  //
+  // 다만 단일 문장도 READ COMMITTED이라, 정확히 동시에 시작한 두 문장은
+  // 서로의 미커밋 INSERT를 못 본다. 그래서 진짜 백스톱은 schema.sql의
+  // 부분 UNIQUE 인덱스(uq_point_ledger_once_per_day)다 — dailyCountCap=1인
+  // 액션은 (device_id, action, day_bucket) 중복 삽입 자체가 DB에서 막힌다.
+  // ON CONFLICT DO NOTHING이 그 위반을 "이미 지급됨"으로 흡수한다.
+  // dailyCountCap > 1인 액션(accurate_report=2, post_survived_24h=5)은
+  // 행 단위 UNIQUE로 표현할 수 없어 여전히 극단적 동시성에서 1건 초과가
+  // 가능하다 — 알려진 한계이고, 두 액션 모두 자체 멱등 장치가 있어
+  // (post_survived_24h는 expert_picks.point_awarded_survival 플래그,
+  // accurate_report는 post_reports의 UNIQUE(post_id, reporter_device_id))
+  // 실제 초과 폭은 최대 1건으로 제한된다.
+  const rows = (await sql`
+    WITH today AS (
+      SELECT
+        COUNT(*) FILTER (WHERE action = ${action})::int AS action_count,
+        COALESCE(SUM(points), 0)::int AS day_total
+      FROM point_ledger
+      WHERE device_id = ${deviceId} AND day_bucket = ${dayBucket}::date
+    ),
+    ins AS (
+      INSERT INTO point_ledger (device_id, action, points, day_bucket)
+      SELECT
+        ${deviceId},
+        ${action},
+        LEAST(${rule.points}::int, ${DAILY_POINT_CAP}::int - t.day_total),
+        ${dayBucket}::date
+      FROM today t
+      WHERE t.action_count < ${rule.dailyCountCap}::int
+        AND t.day_total < ${DAILY_POINT_CAP}::int
+      ON CONFLICT DO NOTHING
+      RETURNING points
+    ),
+    upd AS (
+      UPDATE device_principals
+      SET points_total = points_total + (SELECT points FROM ins)
+      WHERE device_id = ${deviceId} AND EXISTS (SELECT 1 FROM ins)
+      RETURNING points_total
+    )
+    SELECT
+      COALESCE((SELECT points FROM ins), 0)::int AS awarded,
+      COALESCE(
+        (SELECT points_total FROM upd),
+        (SELECT points_total FROM device_principals WHERE device_id = ${deviceId}),
+        0
+      )::int AS new_total
+  `) as { awarded: number; new_total: number }[];
 
-  // 오늘 전체 합산 상한 확인
-  const sumRows = await sql`
-    SELECT COALESCE(SUM(points), 0)::int AS total FROM point_ledger
-    WHERE device_id = ${deviceId} AND day_bucket = ${dayBucket}
-  `;
-  const todayTotal = sumRows[0]?.total ?? 0;
-  const remaining = DAILY_POINT_CAP - todayTotal;
-  if (remaining <= 0) {
-    return { awarded: 0, newTotal: await getPointsTotal(deviceId) };
-  }
-
-  const awarded = Math.min(rule.points, remaining);
-  await sql`
-    INSERT INTO point_ledger (device_id, action, points, day_bucket)
-    VALUES (${deviceId}, ${action}, ${awarded}, ${dayBucket})
-  `;
-  await sql`
-    UPDATE device_principals SET points_total = points_total + ${awarded}
-    WHERE device_id = ${deviceId}
-  `;
-  return { awarded, newTotal: await getPointsTotal(deviceId) };
-}
-
-async function getPointsTotal(deviceId: string): Promise<number> {
-  const rows = await sql`SELECT points_total FROM device_principals WHERE device_id = ${deviceId}`;
-  return rows[0]?.points_total ?? 0;
+  return { awarded: rows[0]?.awarded ?? 0, newTotal: rows[0]?.new_total ?? 0 };
 }

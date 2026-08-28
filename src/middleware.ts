@@ -31,6 +31,7 @@ const RATE_LIMITS: [prefix: string, rpm: number][] = [
   ["/api/v1/content-likes", 20],        // 좋아요 토글 — 탭 1회당 요청 1개뿐이라 타이트하게
   ["/api/v1/keywords", 60],   // 키워드 상세 (여러 개 탐색 고려)
   ["/api/v1/device/register", 5],       // 기기 등록 — 남용 방지로 빡빡하게
+  ["/api/v1/device/me", 30],            // 기기 프로필 조회 — 앱 진입/새로고침마다 1회 수준
   ["/api/v1/posts/upload-image", 10],   // 이미지 업로드 — 일반 게시 엔드포인트보다 무거워 더 빡빡하게
   ["/api/v1/posts/top", 60],            // 인기 게시물 조회 — 읽기 전용
   ["/api/v1/posts", 20],                // 게시+피드 공용, 실제 게시 빈도는 post-gate.ts가 더 강하게 제한

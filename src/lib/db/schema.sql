@@ -637,3 +637,19 @@ CREATE TABLE IF NOT EXISTS moderation_log (
 
 -- Task 3 point-wiring fix: post_survived_24h 포인트 중복 지급 방지 플래그
 ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS point_awarded_survival BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- I4 fix: 일일 포인트 상한 check-then-insert 경합의 DB 레벨 백스톱.
+-- points-ledger.ts의 awardPoints는 카운트·합산·삽입을 CTE 하나로 묶어 왕복
+-- 사이의 경합 창을 없앴지만, 단일 문장도 READ COMMITTED이라 정확히 동시에
+-- 시작한 두 문장은 서로의 미커밋 INSERT를 보지 못한다. dailyCountCap = 1인
+-- 액션은 이 부분 UNIQUE 인덱스로 중복 삽입 자체를 DB에서 막고, 애플리케이션은
+-- ON CONFLICT DO NOTHING으로 그 위반을 "이미 지급됨"으로 흡수한다.
+--
+-- dailyCountCap > 1인 액션(accurate_report=2, post_survived_24h=5)은 행 단위
+-- UNIQUE로 표현할 수 없어 여기 포함하지 않는다 — 알려진 한계이며, 두 액션 모두
+-- 상위 레벨에 자체 멱등 장치가 있어(post_reports의 UNIQUE(post_id,
+-- reporter_device_id), expert_picks.point_awarded_survival) 초과 폭이 제한된다.
+-- 조건절을 IN (...)로 쓴 이유: 앞으로 cap=1 액션이 늘면 목록만 넓히면 된다.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_point_ledger_once_per_day
+  ON point_ledger(device_id, action, day_bucket)
+  WHERE action IN ('attendance');

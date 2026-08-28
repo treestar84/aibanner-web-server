@@ -85,3 +85,23 @@ test("posts upload-image endpoint is rate-limited tighter than general posts end
   assert.ok(uploadIndex >= 0 && postsIndex >= 0);
   assert.ok(uploadIndex < postsIndex, "posts/upload-image must appear before posts in the array");
 });
+
+test("device/me has its own rate limit and is not left on the catch-all 100rpm bucket", () => {
+  const meMatch = middlewareSource.match(/\["\/api\/v1\/device\/me",\s*(\d+)\]/);
+  assert.ok(meMatch, "device/me rate limit entry not found");
+  const meRpm = Number(meMatch![1]);
+  assert.ok(meRpm > 0 && meRpm < 100, "device/me must be tighter than the /api/v1/ catch-all");
+
+  // 프로필 조회는 등록보다 자주 일어나므로 register보다는 느슨해야 한다.
+  const registerRpm = Number(
+    middlewareSource.match(/\["\/api\/v1\/device\/register",\s*(\d+)\]/)![1],
+  );
+  assert.ok(meRpm > registerRpm);
+
+  // /api/v1/device/* 전용 항목들이 catch-all "/api/v1/" 보다 앞에 있어야
+  // startsWith 매칭에서 실제로 적용된다.
+  const meIndex = middlewareSource.indexOf('"/api/v1/device/me"');
+  const catchAllIndex = middlewareSource.indexOf('"/api/v1/"');
+  assert.ok(meIndex >= 0 && catchAllIndex >= 0);
+  assert.ok(meIndex < catchAllIndex, "device/me must appear before the /api/v1/ catch-all");
+});
