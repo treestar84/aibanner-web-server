@@ -25,6 +25,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     const postId = Number.parseInt(id, 10);
     const post = await sql`SELECT author_type FROM expert_picks WHERE id = ${postId}`;
     if (post.length === 0) return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    // 크라우드 신고는 사용자 게시글에만 적용된다. 편집자 큐레이션 글
+    // (author_type='editor')까지 신고 대상이 되면, 임계치를 넘긴 순간
+    // status='hidden_by_report'로 바뀌어 전문가픽이 사용자 손에 내려간다.
+    // 존재 여부 노출을 피하려고 403이 아니라 이 라우트의 기존 404를 재사용한다.
+    if (post[0].author_type !== "user") {
+      return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    }
 
     const body = await req.json().catch(() => ({}));
     const reason = typeof body?.reason === "string" ? body.reason.slice(0, 200) : "unspecified";

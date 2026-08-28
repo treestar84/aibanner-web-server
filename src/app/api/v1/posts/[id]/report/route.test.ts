@@ -9,6 +9,21 @@ test("reports from devices under tier 2 (joined <7 days) are logged but never co
   assert.match(routeSource, /counts_toward_threshold = true/);
 });
 
+test("editor picks cannot be hidden through the crowd-report path", () => {
+  // author_type을 조회만 하고 쓰지 않으면 편집자 큐레이션 글도 신고 임계치로
+  // 내려간다. 신고 적재/카운트 이전에 걸러야 한다.
+  assert.match(routeSource, /post\[0\]\.author_type !== "user"/);
+  const fn = routeSource.match(/export async function POST[\s\S]*?\n}\n/)![0];
+  const gateIndex = fn.indexOf('post[0].author_type !== "user"');
+  const insertIndex = fn.indexOf("INSERT INTO post_reports");
+  const countIndex = fn.indexOf("SELECT COUNT(*)::int AS cnt FROM post_reports");
+  assert.ok(gateIndex > 0, "author_type gate not found");
+  assert.ok(
+    gateIndex < insertIndex && gateIndex < countIndex,
+    "the gate must run before any report insert or threshold counting",
+  );
+});
+
 test("threshold breach hides the post, it does not delete it", () => {
   assert.match(routeSource, /status = 'hidden_by_report'/);
   assert.doesNotMatch(routeSource, /DELETE FROM expert_picks/);
