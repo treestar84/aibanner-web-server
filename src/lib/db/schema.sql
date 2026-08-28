@@ -582,3 +582,55 @@ CREATE TABLE IF NOT EXISTS content_like_events (
 
 CREATE INDEX IF NOT EXISTS idx_content_like_events_created_at
   ON content_like_events(created_at);
+
+-- 커뮤니티 게시판 확장 (2026-08-28)
+ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS author_type TEXT NOT NULL DEFAULT 'editor';
+ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS author_device_id TEXT;
+ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'visible';
+ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS report_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE expert_picks ALTER COLUMN title_ko DROP NOT NULL;
+
+CREATE TABLE IF NOT EXISTS device_principals (
+  device_id       TEXT PRIMARY KEY,
+  post_token_hash TEXT NOT NULL,
+  nickname        TEXT NOT NULL,
+  nickname_changed_at TIMESTAMPTZ,
+  first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  play_integrity_verdict TEXT,
+  points_total    INTEGER NOT NULL DEFAULT 0,
+  tier            SMALLINT NOT NULL DEFAULT 1,
+  last_post_at    TIMESTAMPTZ,
+  banned_until    TIMESTAMPTZ,
+  banned_permanently BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS point_ledger (
+  id            BIGSERIAL PRIMARY KEY,
+  device_id     TEXT NOT NULL REFERENCES device_principals(device_id),
+  action        TEXT NOT NULL,
+  points        INTEGER NOT NULL,
+  day_bucket    DATE NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_point_ledger_device_day ON point_ledger(device_id, day_bucket);
+
+CREATE TABLE IF NOT EXISTS post_reports (
+  id                BIGSERIAL PRIMARY KEY,
+  post_id           INTEGER NOT NULL REFERENCES expert_picks(id),
+  reporter_device_id TEXT NOT NULL REFERENCES device_principals(device_id),
+  reason            TEXT NOT NULL,
+  counts_toward_threshold BOOLEAN NOT NULL,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (post_id, reporter_device_id)
+);
+
+CREATE TABLE IF NOT EXISTS moderation_log (
+  id          BIGSERIAL PRIMARY KEY,
+  post_id     INTEGER NOT NULL REFERENCES expert_picks(id),
+  from_status TEXT,
+  to_status   TEXT NOT NULL,
+  reason      TEXT NOT NULL,
+  actor       TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
