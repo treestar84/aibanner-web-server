@@ -32,6 +32,13 @@ test("duplicate-report catch only swallows the unique_violation (23505), other D
   assert.match(routeSource, /throw err;/);
 });
 
+test("the whole handler is wrapped in this repo's standard outer try/catch, converting rethrown DB errors to a 500 JSON response", () => {
+  assert.match(routeSource, /export async function POST\(req: NextRequest, \{ params \}: RouteParams\) \{\s*\n\s*try \{/);
+  assert.match(routeSource, /\} catch \(err\) \{\s*\n\s*const message = err instanceof Error \? err\.message : "Internal server error";/);
+  assert.match(routeSource, /console\.error\("\[\/api\/v1\/posts\/\[id\]\/report\]\[POST\]", err\);/);
+  assert.match(routeSource, /return NextResponse\.json\(\{ error: message \}, \{ status: 500 \}\);/);
+});
+
 test("reporter tier is recomputed live rather than trusted from the auth object", () => {
   assert.match(routeSource, /computeTier\(firstSeenAt, pointsTotal\)/);
   assert.doesNotMatch(routeSource, /auth\.tier/);
