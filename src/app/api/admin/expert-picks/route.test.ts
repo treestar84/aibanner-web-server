@@ -11,6 +11,27 @@ test("GET and POST both call requireAdminRequest before touching the DB", () => 
   assert.match(postFn, /requireAdminRequest\(req\)/);
 });
 
+// C1: 관리자 전문가픽 패널은 편집자 큐레이션 글만 다룬다. 사용자 게시글은
+// /api/admin/posts/reported 모더레이션 큐가 따로 담당하므로, 이 목록에
+// author_type='user' 행이 섞여 나오면 안 된다. includeDisabled(=enabledOnly
+// false) 의미는 그대로 유지한다 — 비활성 편집자 글은 계속 보여야 한다.
+test("admin list never returns user posts, while still showing disabled editor rows", () => {
+  assert.match(routeSource, /listExpertPicks\(false\)/);
+  const queriesSource = readFileSync(
+    new URL("../../../../lib/db/queries.ts", import.meta.url),
+    "utf8",
+  );
+  const fn = queriesSource.match(
+    /export async function listExpertPicks[\s\S]*?\n}\n/,
+  )![0];
+  const adminBranch = fn.match(
+    /WHERE author_type = 'editor'\n\s*ORDER BY sort_order DESC, created_at DESC\n\s*`/,
+  );
+  assert.ok(adminBranch, "unlimited admin branch must filter on author_type only");
+  assert.doesNotMatch(adminBranch![0], /status = 'visible'/);
+  assert.doesNotMatch(adminBranch![0], /enabled = TRUE/);
+});
+
 test("POST rejects a paste with no non-empty line for a title", () => {
   assert.match(routeSource, /if \(!parsed\.title\)/);
 });

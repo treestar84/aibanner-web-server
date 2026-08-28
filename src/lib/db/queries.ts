@@ -1489,9 +1489,14 @@ export interface DeletedExpertPick {
 export async function deleteExpertPicksOlderThan(
   days: number,
 ): Promise<DeletedExpertPick[]> {
+  // C1과 같은 이유로 author_type='editor'로 좁힌다. 좁히지 않으면 이 보존
+  // 정책이 사용자 게시글까지 물리 삭제하는데, post_reports/moderation_log가
+  // expert_picks(id)를 FK로 참조하므로 신고 이력이 있는 오래된 사용자 글을
+  // 만나는 순간 FK 위반으로 retention 크론 전체가 실패한다.
   const rows = (await sql`
     DELETE FROM expert_picks
     WHERE created_at < NOW() - (${days} * INTERVAL '1 day')
+      AND author_type = 'editor'
     RETURNING id, image_url
   `) as DeletedExpertPick[];
 
@@ -1984,8 +1989,19 @@ export interface ExpertPick {
   version: number;
 }
 
+// expert_picks 테이블은 2026-08-28 커뮤니티 게시판 확장 이후 편집자 큐레이션
+// 글(author_type='editor')과 사용자 게시글(author_type='user')을 함께 담는다.
+// 이 파일의 expert-pick 조회 함수들은 전부 "편집자 글" 전용이므로, 어떤 경로로도
+// 사용자 글이 전문가픽 피드/상세/관리자 편집 화면에 새어 나오지 않도록
+// author_type = 'editor'를 항상 강제한다. 사용자 글은 /api/v1/posts*와
+// /api/admin/posts/* 가 따로 담당한다.
+//
 // limit을 생략하면(관리자 목록 등) 전부 반환한다. 공개 목록은 항상 limit을
 // 넘겨 무한정 누적되는 과거 글이 그대로 다 내려가지 않도록 한다.
+// enabledOnly=true는 "공개 노출용" 조회를 뜻하므로 enabled 뿐 아니라
+// status='visible'(신고/관리자 조치로 숨겨지지 않은 글)까지 함께 요구한다.
+// enabledOnly=false(관리자 목록)는 기존 의미 그대로 비활성 행도 보여주되,
+// author_type만 editor로 좁힌다.
 export async function listExpertPicks(
   enabledOnly = false,
   limit?: number,
@@ -1994,40 +2010,65 @@ export async function listExpertPicks(
     ? limit
       ? await sql`
           SELECT * FROM expert_picks
-          WHERE enabled = TRUE
+          WHERE enabled = TRUE AND author_type = 'editor' AND status = 'visible'
           ORDER BY sort_order DESC, created_at DESC
           LIMIT ${limit}
         `
       : await sql`
           SELECT * FROM expert_picks
-          WHERE enabled = TRUE
+          WHERE enabled = TRUE AND author_type = 'editor' AND status = 'visible'
           ORDER BY sort_order DESC, created_at DESC
         `
     : limit
       ? await sql`
           SELECT * FROM expert_picks
+          WHERE author_type = 'editor'
           ORDER BY sort_order DESC, created_at DESC
           LIMIT ${limit}
         `
       : await sql`
           SELECT * FROM expert_picks
+          WHERE author_type = 'editor'
           ORDER BY sort_order DESC, created_at DESC
         `;
   return rows as ExpertPick[];
 }
 
+// 공개 경로(앱 상세 API, 웹 상세 페이지, generateMetadata, 조회수 집계) 전용.
+// 안전한 기본값이 되도록 이 이름이 필터링된 버전을 갖는다 — 필터 없는 조회가
+// 필요한 관리자 경로는 getExpertPickByIdForAdmin을 명시적으로 골라야 한다.
 export async function getExpertPickById(id: number): Promise<ExpertPick | null> {
-  const rows = await sql`SELECT * FROM expert_picks WHERE id = ${id}`;
+  const rows = await sql`
+    SELECT * FROM expert_picks
+    WHERE id = ${id} AND author_type = 'editor' AND status = 'visible'
+  `;
+  return (rows as ExpertPick[])[0] ?? null;
+}
+
+// 관리자 수정/삭제 경로 전용. status는 걸지 않는다 — 신고로 숨겨진 편집자 글을
+// 관리자가 다시 확인하고 되살릴 수 있어야 하기 때문이다. 대신 author_type은
+// 반드시 editor로 좁혀서, 관리자가 URL의 숫자 id를 추측해 사용자 글을
+// 전문가픽 편집 UI로 수정/삭제하는 경로를 막는다(사용자 글 조치는
+// /api/admin/posts/* 모더레이션 큐에서만 이뤄져야 한다).
+export async function getExpertPickByIdForAdmin(
+  id: number,
+): Promise<ExpertPick | null> {
+  const rows = await sql`
+    SELECT * FROM expert_picks WHERE id = ${id} AND author_type = 'editor'
+  `;
   return (rows as ExpertPick[])[0] ?? null;
 }
 
 // 비활성 행까지 포함해 MAX(updated_at)을 구한다. enabled = TRUE로 좁히면
 // 최신 항목을 비활성화했을 때 최댓값이 과거로 되돌아가 If-Modified-Since가
 // 영원히 304를 돌려준다. (행이 완전히 삭제되는 경우는 여전히 남는 한계다.)
+// author_type='editor'로는 좁힌다 — 사용자 글 한 건이 갱신됐다고 전문가픽
+// 피드의 Last-Modified가 밀려 불필요한 200 응답이 나가지 않도록.
 export async function getExpertPickMaxUpdatedAt(): Promise<string | null> {
   const rows = await sql`
     SELECT MAX(updated_at) AS max_updated_at
     FROM expert_picks
+    WHERE author_type = 'editor'
   `;
   return (
     (rows as { max_updated_at: string | null }[])[0]?.max_updated_at ?? null
@@ -2077,7 +2118,7 @@ export async function updateExpertPick(
     enabled?: boolean;
   },
 ): Promise<ExpertPick | "not_found" | "conflict"> {
-  const existing = await getExpertPickById(id);
+  const existing = await getExpertPickByIdForAdmin(id);
   if (!existing) return "not_found";
 
   const rows = await sql`
@@ -2095,7 +2136,7 @@ export async function updateExpertPick(
       enabled      = COALESCE(${input.enabled ?? null}, enabled),
       updated_at   = NOW(),
       version      = version + 1
-    WHERE id = ${id} AND version = ${expectedVersion}
+    WHERE id = ${id} AND version = ${expectedVersion} AND author_type = 'editor'
     RETURNING *
   `;
   const updated = (rows as ExpertPick[])[0];
@@ -2104,7 +2145,9 @@ export async function updateExpertPick(
 
 export async function deleteExpertPick(id: number): Promise<boolean> {
   const rows = await sql`
-    DELETE FROM expert_picks WHERE id = ${id} RETURNING id
+    DELETE FROM expert_picks
+    WHERE id = ${id} AND author_type = 'editor'
+    RETURNING id
   `;
   return (rows as { id: number }[]).length > 0;
 }

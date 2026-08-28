@@ -21,3 +21,23 @@ test("public list endpoint caps unbounded growth with a default+max limit", () =
 test("public list endpoint never exposes body_ko_raw or ai_tuned internals", () => {
   assert.doesNotMatch(routeSource, /body_ko_raw|aiTuned|ai_tuned/);
 });
+
+// C1: expert_picks는 사용자 게시글과 테이블을 공유한다. 이 라우트가 부르는
+// listExpertPicks(true, limit) 분기가 실제로 편집자 글 + visible로 좁혀져
+// 있는지를 쿼리 소스까지 건너가 확인한다 — 라우트만 봐서는 알 수 없다.
+test("the query branch this public route uses excludes user posts and moderated rows", () => {
+  const queriesSource = readFileSync(
+    new URL("../../../../lib/db/queries.ts", import.meta.url),
+    "utf8",
+  );
+  const fn = queriesSource.match(
+    /export async function listExpertPicks[\s\S]*?\n}\n/,
+  );
+  assert.ok(fn, "listExpertPicks not found in queries.ts");
+  const enabledWithLimit = fn![0].match(
+    /WHERE enabled = TRUE[^\n]*\n\s*ORDER BY[^\n]*\n\s*LIMIT \$\{limit\}/,
+  );
+  assert.ok(enabledWithLimit, "enabledOnly+limit branch not found");
+  assert.match(enabledWithLimit![0], /author_type = 'editor'/);
+  assert.match(enabledWithLimit![0], /status = 'visible'/);
+});
