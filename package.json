@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import tsx --test $(find src -type f -name '*.test.ts' | sort)",
+    "test": "node --import tsx scripts/run-tests.mjs",
     "lint": "eslint src scripts next.config.ts",
     "db:migrate": "npx tsx scripts/db/migrate.ts",
     "admin:hash": "node scripts/admin/generate-admin-password-hash.mjs",
