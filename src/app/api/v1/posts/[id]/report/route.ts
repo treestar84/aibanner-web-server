@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { NeonDbError } from "@neondatabase/serverless";
 import { sql } from "@/lib/db/client";
 import { computeTier, REPORT_THRESHOLD_BY_TIER } from "@/lib/tier";
 import { requirePostToken } from "@/lib/post-token-auth";
@@ -32,8 +33,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       INSERT INTO post_reports (post_id, reporter_device_id, reason, counts_toward_threshold)
       VALUES (${postId}, ${deviceId}, ${reason}, ${countsTowardThreshold})
     `;
-  } catch {
-    return NextResponse.json({ error: "Already reported by this device" }, { status: 409 });
+  } catch (err) {
+    // 23505 = Postgres unique_violation. post_reports의 UNIQUE(post_id, reporter_device_id)
+    // 위반일 때만 409로 응답하고, 그 외 DB 에러(커넥션 끊김 등)는 진짜 에러로 다시 던진다.
+    if (err instanceof NeonDbError && err.code === "23505") {
+      return NextResponse.json({ error: "Already reported by this device" }, { status: 409 });
+    }
+    throw err;
   }
 
   const countedRows = await sql`
@@ -48,8 +54,19 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const threshold = REPORT_THRESHOLD_BY_TIER[authorTier] ?? 3;
 
   if (countedTotal >= threshold) {
-    await sql`UPDATE expert_picks SET status = 'hidden_by_report', report_count = ${countedTotal} WHERE id = ${postId} AND status = 'visible'`;
-    await sql`INSERT INTO moderation_log (post_id, from_status, to_status, reason, actor) VALUES (${postId}, 'visible', 'hidden_by_report', 'report_threshold', 'system')`;
+    // status = 'visible' 조건에 걸려 실제로 행이 바뀐 경우에만 moderation_log를 남긴다.
+    // 이미 hidden_by_report인 글에 신고가 계속 들어오면 countedTotal >= threshold는 매번 참이 되므로,
+    // RETURNING 없이 무조건 INSERT하면 전환되지 않은 매 요청마다 가짜 visible→hidden 로그가 쌓인다.
+    const updated = await sql`
+      UPDATE expert_picks SET status = 'hidden_by_report', report_count = ${countedTotal}
+      WHERE id = ${postId} AND status = 'visible'
+      RETURNING id
+    `;
+    if (updated.length > 0) {
+      await sql`INSERT INTO moderation_log (post_id, from_status, to_status, reason, actor) VALUES (${postId}, 'visible', 'hidden_by_report', 'report_threshold', 'system')`;
+    } else {
+      await sql`UPDATE expert_picks SET report_count = ${countedTotal} WHERE id = ${postId}`;
+    }
   } else {
     await sql`UPDATE expert_picks SET report_count = ${countedTotal} WHERE id = ${postId}`;
   }
