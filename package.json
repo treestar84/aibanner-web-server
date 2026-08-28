@@ -17,6 +17,7 @@
     "@tavily/core": "^0.3.0",
     "@vercel/blob": "^2.8.0",
     "cheerio": "^1.0.0",
+    "google-auth-library": "^11.0.2",
     "mcp-handler": "^1.1.0",
     "next": "15.5.20",
     "openai": "^4.86.1",
