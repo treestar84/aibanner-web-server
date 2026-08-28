@@ -33,3 +33,30 @@ test("content-likes toggle endpoint is rate-limited tighter than its batch count
   assert.ok(countsIndex >= 0 && toggleIndex >= 0);
   assert.ok(countsIndex < toggleIndex);
 });
+
+test("device register endpoint is rate-limited tighter than posts endpoints", () => {
+  const deviceMatch = middlewareSource.match(
+    /\["\/api\/v1\/device\/register",\s*(\d+)\]/,
+  );
+  const postsMatch = middlewareSource.match(
+    /\["\/api\/v1\/posts",\s*(\d+)\]/,
+  );
+  assert.ok(deviceMatch, "device/register rate limit entry not found");
+  assert.ok(postsMatch, "posts rate limit entry not found");
+  const deviceRpm = Number(deviceMatch![1]);
+  const postsRpm = Number(postsMatch![1]);
+  assert.ok(
+    deviceRpm < postsRpm,
+    "registration endpoint should be capped much tighter than general posts endpoint",
+  );
+});
+
+test("posts top endpoint comes before posts general endpoint in RATE_LIMITS array", () => {
+  // 더 구체적인 prefix(posts/top)가 배열에서 더 앞에 있어야 한다 — 뒤에 있으면
+  // startsWith 매칭에서 "/api/v1/posts"에 먼저 걸려 posts/top 전용
+  // 제한이 절대 적용되지 않는다.
+  const topIndex = middlewareSource.indexOf('"/api/v1/posts/top"');
+  const postsIndex = middlewareSource.indexOf('"/api/v1/posts"');
+  assert.ok(topIndex >= 0 && postsIndex >= 0);
+  assert.ok(topIndex < postsIndex, "posts/top must appear before posts in the array");
+});
