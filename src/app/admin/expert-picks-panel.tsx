@@ -41,9 +41,10 @@ export function ExpertPicksPanel() {
   const [authorLabel, setAuthorLabel] = useState("");
 
   const [tuning, setTuning] = useState(false);
-  const [tunedPreview, setTunedPreview] = useState<string | null>(null);
-  // "이 버전 적용"으로 확정한 AI 튜닝 본문. pasteText(붙여넣기 원문)는 절대 덮어쓰지 않는다.
-  const [appliedTunedBody, setAppliedTunedBody] = useState<string | null>(null);
+  // AI 재작성 미리보기 — 제목도 원문을 베끼지 않고 새로 쓰므로 본문과 함께 쌍으로 보관한다.
+  const [tunedPreview, setTunedPreview] = useState<{ title: string; body: string } | null>(null);
+  // "이 버전 적용"으로 확정한 AI 재작성 결과. pasteText(붙여넣기 원문)는 절대 덮어쓰지 않는다.
+  const [appliedTuned, setAppliedTuned] = useState<{ title: string; body: string } | null>(null);
 
   const parsedPreview = pasteText.trim() ? parseExpertPickPaste(pasteText) : null;
 
@@ -85,32 +86,39 @@ export function ExpertPicksPanel() {
   };
 
   const handleTune = async () => {
-    if (!pasteText.trim()) return;
+    if (!pasteText.trim() || !parsedPreview) return;
     setTuning(true);
     setError("");
     try {
       const res = await fetch("/api/admin/expert-picks/tune", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bodyKo: pasteText.trim() }),
+        // 서버 파서가 분리한 제목/본문을 각각 보낸다 — 제목 줄까지 섞어서
+        // 보내면 AI가 맞춤법을 고치다 제목 줄 표현이 살짝 바뀌어 "본문 첫 줄
+        // 제목 중복 제거" 매칭이 깨지는 문제가 있었다. 이제는 제목도 AI가
+        // 독립적으로 새로 쓰므로 그 문제 자체가 구조적으로 사라진다.
+        body: JSON.stringify({
+          titleKo: parsedPreview.title,
+          bodyKo: parsedPreview.body,
+        }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const data = await res.json();
-      setTunedPreview(data.tunedKo);
-      setAppliedTunedBody(null);
+      setTunedPreview({ title: data.tunedTitleKo, body: data.tunedBodyKo });
+      setAppliedTuned(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "AI 튜닝 실패");
+      setError(err instanceof Error ? err.message : "AI 재작성 실패");
     } finally {
       setTuning(false);
     }
   };
 
-  // 원문 textarea는 그대로 두고, 발행 시 본문으로 쓸 튜닝 결과만 확정한다.
+  // 원문 textarea는 그대로 두고, 발행 시 쓸 재작성 결과(제목+본문)만 확정한다.
   const applyTuned = () => {
-    if (tunedPreview) setAppliedTunedBody(tunedPreview);
+    if (tunedPreview) setAppliedTuned(tunedPreview);
   };
 
-  const cancelTuned = () => setAppliedTunedBody(null);
+  const cancelTuned = () => setAppliedTuned(null);
 
   const handleSubmit = async (e: SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -125,10 +133,11 @@ export function ExpertPicksPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // bodyKoRaw는 언제나 붙여넣기 원문. bodyKo는 튜닝을 적용했을 때만 덮어쓴다.
+          // bodyKoRaw는 언제나 붙여넣기 원문. titleKo/bodyKo는 AI 재작성을
+          // 적용했을 때만 덮어쓴다 — 이때 제목도 원문과 다른 새 제목이 된다.
           bodyKoRaw: pasteText,
-          ...(appliedTunedBody
-            ? { bodyKo: appliedTunedBody, aiTuned: true }
+          ...(appliedTuned
+            ? { titleKo: appliedTuned.title, bodyKo: appliedTuned.body, aiTuned: true }
             : { aiTuned: false }),
           imageUrl,
           authorLabel: authorLabel.trim(),
@@ -139,7 +148,7 @@ export function ExpertPicksPanel() {
       setImageUrl("");
       setAuthorLabel("");
       setTunedPreview(null);
-      setAppliedTunedBody(null);
+      setAppliedTuned(null);
       await fetchItems();
     } catch (err) {
       setError(err instanceof Error ? err.message : "발행 실패");
@@ -219,8 +228,12 @@ export function ExpertPicksPanel() {
             disabled={tuning || !pasteText.trim()}
             className="rounded-lg border border-violet-500/60 bg-violet-500/10 px-4 py-2 text-sm text-violet-100 disabled:opacity-50"
           >
-            {tuning ? "AI가 다듬는 중..." : "✨ AI로 다듬기"}
+            {tuning ? "AI가 재작성하는 중..." : "✨ AI로 재작성"}
           </button>
+          <p className="text-xs text-zinc-500">
+            원문을 그대로 다듬는 게 아니라, 사실관계만 보존한 채 다른 문장·제목으로 다시 씁니다
+            (저작권 보호 목적). 발행 전 반드시 결과를 검수해 주세요.
+          </p>
         </div>
 
         {tunedPreview && (
@@ -228,21 +241,23 @@ export function ExpertPicksPanel() {
             <div>
               <p className="text-xs text-zinc-500 mb-1">
                 원문
-                {!appliedTunedBody && (
+                {!appliedTuned && (
                   <span className="ml-2 text-emerald-300">· 이 버전이 발행됩니다</span>
                 )}
               </p>
+              <p className="text-sm text-zinc-300 font-semibold mb-1">{parsedPreview?.title}</p>
               <p className="text-sm text-zinc-300 whitespace-pre-wrap">{pasteText}</p>
             </div>
             <div>
               <p className="text-xs text-violet-300 mb-1">
-                AI 튜닝 결과
-                {appliedTunedBody === tunedPreview && (
+                AI 재작성 결과
+                {appliedTuned === tunedPreview && (
                   <span className="ml-2 text-emerald-300">· 적용됨 — 이 버전이 발행됩니다</span>
                 )}
               </p>
-              <p className="text-sm text-zinc-100 whitespace-pre-wrap">{tunedPreview}</p>
-              {appliedTunedBody === tunedPreview ? (
+              <p className="text-sm text-violet-100 font-semibold mb-1">{tunedPreview.title}</p>
+              <p className="text-sm text-zinc-100 whitespace-pre-wrap">{tunedPreview.body}</p>
+              {appliedTuned === tunedPreview ? (
                 <button
                   type="button"
                   onClick={cancelTuned}

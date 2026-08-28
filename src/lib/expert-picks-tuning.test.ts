@@ -1,15 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTuningPrompt } from "./expert-picks-tuning";
+import { buildRewritePrompt } from "./expert-picks-tuning";
 
-test("tuning prompt instructs the model to preserve facts and paragraph structure", () => {
-  const { system } = buildTuningPrompt("아무 텍스트");
-  assert.match(system, /사실|fact/i);
-  assert.match(system, /줄바꿈|paragraph/i);
+test("rewrite prompt forbids reusing the original wording/structure and fabricating facts", () => {
+  const { system } = buildRewritePrompt("제목", "아무 텍스트");
+  assert.match(system, /사실관계/);
+  assert.match(system, /연속 7단어/);
+  assert.match(system, /같은 문단 순서/);
+  assert.match(system, /새로 만들어내기/);
 });
 
-test("tuning prompt embeds the original body verbatim in the user message", () => {
+test("rewrite prompt requires a freshly written title, not a copy of the original", () => {
+  const { system } = buildRewritePrompt("제목", "아무 텍스트");
+  assert.match(system, /제목을 베끼거나 다듬지 말고/);
+});
+
+test("rewrite prompt requires strict JSON output", () => {
+  const { system } = buildRewritePrompt("제목", "아무 텍스트");
+  assert.match(system, /"title"/);
+  assert.match(system, /"body"/);
+});
+
+test("rewrite prompt embeds the original title and body verbatim in the user message", () => {
   const bodyKo = "오픈AI가\n새 모델을 발표했다.";
-  const { user } = buildTuningPrompt(bodyKo);
+  const { user } = buildRewritePrompt("오픈AI 새 모델", bodyKo);
+  assert.match(user, /오픈AI 새 모델/);
   assert.match(user, /오픈AI가\n새 모델을 발표했다\./);
 });
