@@ -15,6 +15,15 @@
 // reproduces identically with quoted paths, absolute paths, and NUL-safe
 // xargs. Importing each file directly with dynamic import(), rather than
 // handing paths to `--test`, sidesteps that matcher entirely.
+//
+// Isolation tradeoff: unlike `node --test`, which runs each file in its own
+// process, this script imports every test file into ONE process/module
+// graph, so module-level mutable state is no longer isolated per file.
+// Nothing in the current suite depends on that isolation (e.g. the cache in
+// `src/lib/mcp/cache.ts` is reset with `beforeEach` in its own test file -
+// see `src/lib/mcp/cache.test.ts` for the pattern), but any new test that touches
+// module-level mutable state must clean it up itself (beforeEach/afterEach),
+// or it may pass/fail differently depending on file import order.
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import "node:test";
