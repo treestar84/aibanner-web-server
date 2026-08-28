@@ -3,6 +3,7 @@ import { sql } from "@/lib/db/client";
 import { computeTier, POST_FREQUENCY_BY_TIER } from "@/lib/tier";
 import { canPostNow } from "@/lib/post-gate";
 import { requirePostToken } from "@/lib/post-token-auth";
+import { isAllowedBlobImageUrl } from "@/lib/blob-image-url";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -57,12 +58,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "body exceeds 1000 characters" }, { status: 400 });
   }
 
+  // imageUrl은 반드시 우리 업로드 엔드포인트가 돌려준 Blob URL이어야 한다.
+  // 그러지 않으면 MIME/용량 검사를 다 우회해 임의 외부 이미지를 피드에 심을 수 있다.
+  const imageUrl = typeof body?.imageUrl === "string" ? body.imageUrl.trim() : "";
+  if (imageUrl && !isAllowedBlobImageUrl(imageUrl)) {
+    return NextResponse.json(
+      { error: "imageUrl must be an image uploaded via /api/v1/posts/upload-image" },
+      { status: 400 },
+    );
+  }
+
   // author_nickname은 저장하지 않는다: 닉네임은 device_principals에서 조회 시점에 JOIN해
   // 최신 값을 보여준다(닉네임은 7일에 1회 변경 가능하므로 게시 시점 값을 박아넣으면
   // 이후 닉네임 변경 시 옛 글에 stale한 닉네임이 남는다).
   const inserted = await sql`
     INSERT INTO expert_picks (title_ko, body_ko, body_ko_raw, author_type, author_device_id, image_url, link_url, link_domain, sort_order, enabled)
-    VALUES (NULL, ${bodyKo}, ${bodyKo}, 'user', ${deviceId}, ${body?.imageUrl ?? ""}, ${body?.linkUrl ?? ""}, ${body?.linkDomain ?? ""}, 0, true)
+    VALUES (NULL, ${bodyKo}, ${bodyKo}, 'user', ${deviceId}, ${imageUrl}, ${body?.linkUrl ?? ""}, ${body?.linkDomain ?? ""}, 0, true)
     RETURNING id
   `;
   await sql`UPDATE device_principals SET last_post_at = NOW() WHERE device_id = ${deviceId}`;

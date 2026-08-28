@@ -44,3 +44,12 @@ test("feed GET paginates by cursor on descending id", () => {
   assert.match(routeSource, /ep\.id < \$\{cursorId\}::int/);
   assert.match(routeSource, /ORDER BY ep\.id DESC/);
 });
+
+// I5: 업로드 라우트의 MIME/용량/인증 검사를 우회하는 임의 imageUrl 차단
+test("POST validates imageUrl against the blob host instead of trusting the client", () => {
+  assert.match(routeSource, /import \{ isAllowedBlobImageUrl \} from "@\/lib\/blob-image-url"/);
+  assert.match(routeSource, /if \(imageUrl && !isAllowedBlobImageUrl\(imageUrl\)\)/);
+  assert.match(routeSource, /status: 400/);
+  // 검증하지 않은 원본 값이 INSERT로 새어 들어가면 안 된다.
+  assert.doesNotMatch(routeSource, /body\?\.imageUrl \?\? ""/);
+});
