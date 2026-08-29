@@ -11,6 +11,7 @@ import { YoutubeSourceChannelsPanel } from "./youtube-source-channels-panel";
 import { ManualYoutubeLinksPanel } from "./manual-youtube-links-panel";
 import { PromoContentsPanel } from "./promo-contents-panel";
 import { ExpertPicksPanel } from "./expert-picks-panel";
+import { CommunityPostsPanel } from "./community-posts-panel";
 import { AdminNav, type AdminTab } from "./admin-nav";
 import {
   buildManualKeywordFeedback,
@@ -467,6 +468,9 @@ export default function AdminPage() {
 
         {/* ── 전문가픽 관리 ── */}
         {activeTab === "expertPicks" && <ExpertPicksPanel />}
+
+        {/* ── 커뮤니티 신고 관리 ── */}
+        {activeTab === "communityPosts" && <CommunityPostsPanel />}
       </section>
     </main>
   );
