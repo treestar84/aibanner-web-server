@@ -77,6 +77,15 @@ test("feed GET paginates by cursor on descending id", () => {
   assert.match(routeSource, /ORDER BY ep\.id DESC/);
 });
 
+test("feed GET exposes a hashed author_key instead of the raw device id", () => {
+  assert.match(routeSource, /import \{ authorKeyFor \} from "@\/lib\/author-key"/);
+  assert.match(routeSource, /dp\.device_id AS author_device_id/);
+  assert.match(routeSource, /author_key: authorKeyFor\(author_device_id as string \| null\)/);
+  // author_device_id는 응답 items에 그대로 남아있으면 안 된다 — map에서 걷어낸다.
+  assert.match(routeSource, /const items = rows\.map\(\(\{ author_device_id, \.\.\.rest \}\)/);
+  assert.match(routeSource, /NextResponse\.json\(\{ items \}\);/);
+});
+
 // I7: 두 핸들러 모두 이 저장소 표준인 바깥쪽 try/catch가 없었다.
 test("both handlers are wrapped in the repo's standard outer try/catch", () => {
   assert.match(routeSource, /export async function POST\(req: NextRequest\) \{\s*\n\s*try \{/);
