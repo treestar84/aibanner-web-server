@@ -4,6 +4,7 @@ import { computeTier, POST_FREQUENCY_BY_TIER } from "@/lib/tier";
 import { canPostNow } from "@/lib/post-gate";
 import { requirePostToken } from "@/lib/post-token-auth";
 import { isAllowedBlobImageUrl } from "@/lib/blob-image-url";
+import { authorKeyFor } from "@/lib/author-key";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -144,7 +145,7 @@ export async function GET(req: NextRequest) {
 
     const rows = await sql`
       SELECT ep.id, ep.body_ko AS body, ep.image_url, ep.link_url, ep.link_domain,
-             dp.nickname AS author_nickname, ep.created_at
+             dp.nickname AS author_nickname, dp.device_id AS author_device_id, ep.created_at
       FROM expert_picks ep
       JOIN device_principals dp ON dp.device_id = ep.author_device_id
       WHERE ep.author_type = 'user' AND ep.status = 'visible'
@@ -152,7 +153,14 @@ export async function GET(req: NextRequest) {
       ORDER BY ep.id DESC
       LIMIT 20
     `;
-    return NextResponse.json({ items: rows });
+    // author_device_id는 클라이언트에 원본 그대로 내려주지 않는다 — 대신
+    // 클라이언트가 "이 작성자 차단"에 쓸 수 있는 안정적인 익명 해시 키로
+    // 바꿔치기한다(authorKeyFor 문서 참고).
+    const items = rows.map(({ author_device_id, ...rest }) => ({
+      ...rest,
+      author_key: authorKeyFor(author_device_id as string | null),
+    }));
+    return NextResponse.json({ items });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";
     console.error("[/api/v1/posts][GET]", err);

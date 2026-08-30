@@ -18,6 +18,12 @@ test("top endpoint left-joins device_principals so editor rows (no author_device
   assert.match(routeSource, /dp\.nickname AS author_nickname/);
 });
 
+test("top endpoint exposes a hashed author_key instead of the raw device id", () => {
+  assert.match(routeSource, /import \{ authorKeyFor \} from "@\/lib\/author-key"/);
+  assert.match(routeSource, /dp\.device_id AS author_device_id/);
+  assert.match(routeSource, /author_key: authorKeyFor\(author_device_id as string \| null\)/);
+});
+
 test("top endpoint caps limit at 10 and revalidates every 60s", () => {
   assert.match(routeSource, /Math\.min\(Number\.parseInt\(req\.nextUrl\.searchParams\.get\("limit"\) \?\? "10", 10\) \|\| 10, 10\)/);
   assert.match(routeSource, /export const revalidate = 60;/);
