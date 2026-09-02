@@ -8,8 +8,11 @@ export const revalidate = 60;
 export async function GET(req: NextRequest) {
   try {
     const scope = req.nextUrl.searchParams.get("scope");
-    if (scope !== "user" && scope !== "editor") {
-      return NextResponse.json({ error: "scope must be 'user' or 'editor'" }, { status: 400 });
+    if (scope !== "user" && scope !== "editor" && scope !== "all") {
+      return NextResponse.json(
+        { error: "scope must be 'user', 'editor', or 'all'" },
+        { status: 400 },
+      );
     }
     const limit = Math.min(Number.parseInt(req.nextUrl.searchParams.get("limit") ?? "10", 10) || 10, 10);
 
@@ -18,15 +21,20 @@ export async function GET(req: NextRequest) {
     // 테스트 user 글은 author_device_id가 NULL이라 LEFT JOIN이 아니면
     // (INNER JOIN이면) 통째로 사라지므로 반드시 LEFT JOIN이어야 한다.
     // dp.nickname이 없을 때는(editor 글, 관리자 테스트 글) author_label로 대체한다.
+    //
+    // scope='all'은 에디터픽/사용자 글을 좋아요 수 기준으로 한 줄 세우기
+    // 위한 용도(위젯의 "커뮤니티" 슬롯이 씀) — author_type 조건 자체를
+    // 생략해 두 종류를 한 목록에 섞는다.
     const rows = await sql`
       SELECT ep.id, ep.title_ko, ep.body_ko AS body, ep.image_url, ep.link_url, ep.link_domain,
              ep.author_type, COALESCE(dp.nickname, ep.author_label) AS author_nickname,
              dp.device_id AS author_device_id,
+             (dp.device_id IS NULL) AS is_admin_authored,
              COALESCE(cl.like_count, 0) AS like_count
       FROM expert_picks ep
       LEFT JOIN device_principals dp ON dp.device_id = ep.author_device_id
       LEFT JOIN content_likes cl ON cl.content_type = 'expertPicks' AND cl.content_id = ep.id::text
-      WHERE ep.status = 'visible' AND ep.author_type = ${scope}
+      WHERE ep.status = 'visible' AND (${scope}::text = 'all' OR ep.author_type = ${scope}::text)
       ORDER BY like_count DESC, ep.id DESC
       LIMIT ${limit}
     `;

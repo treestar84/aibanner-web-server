@@ -62,9 +62,20 @@ test("canPostNow still runs first so the friendly nextAllowedAt response is pres
   assert.match(postFn, /nextAllowedAt: gate\.nextAllowedAt \?\? null/);
 });
 
-test("feed GET only returns visible user posts, never editor picks or hidden/removed posts", () => {
+// 에디터픽을 별도 화면이 아니라 이 피드 안의 한 카테고리로 통합했다 —
+// author_type 필터가 'user' 하나가 아니라 'user'/'editor' 둘 다여야 한다.
+test("feed GET returns both user posts and editor picks (unified as one community feed), never hidden/removed posts", () => {
   assert.match(routeSource, /export async function GET\(req: NextRequest\)/);
-  assert.match(routeSource, /ep\.author_type = 'user' AND ep\.status = 'visible'/);
+  assert.match(routeSource, /ep\.author_type IN \('user', 'editor'\) AND ep\.status = 'visible'/);
+});
+
+test("feed GET selects title_ko/author_type so editor-picks items can render a title and category badge", () => {
+  assert.match(routeSource, /SELECT ep\.id, ep\.title_ko, ep\.body_ko AS body/);
+  assert.match(routeSource, /ep\.author_type,/);
+});
+
+test("feed GET computes is_admin_authored from device presence, without leaking the raw device id", () => {
+  assert.match(routeSource, /\(dp\.device_id IS NULL\) AS is_admin_authored/);
 });
 
 test("feed GET joins device_principals for a live nickname instead of reading a stored column", () => {

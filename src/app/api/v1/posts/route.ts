@@ -143,19 +143,31 @@ export async function GET(req: NextRequest) {
       cursorId = parsed;
     }
 
-    // 관리자가 /api/admin/community-posts로 테스트 삼아 올린 글은
-    // author_device_id가 NULL이라(실제 기기가 없음) INNER JOIN이면 통째로
-    // 사라진다. LEFT JOIN + COALESCE(dp.nickname, ep.author_label)로 바꿔서,
-    // 기기가 있으면 기기 닉네임을, 없으면 관리자가 지정한 author_label을
-    // 닉네임으로 쓴다. 실제 사용자 글은 author_device_id가 항상 있으므로
-    // 동작에 변화가 없다.
+    // 에디터픽(관리자가 제목까지 갖춰 직접 발행하는 콘텐츠)을 별도 화면이
+    // 아니라 이 커뮤니티 피드 안의 한 카테고리로 통합한다 — author_type
+    // 필터를 'user'만에서 'user'/'editor' 둘 다로 넓혔다. title_ko도 함께
+    // 내려줘야 클라이언트가 에디터픽 항목에 제목을 보여줄 수 있다.
+    //
+    // 관리자가 /api/admin/community-posts로 테스트 삼아 올린 글, 그리고
+    // 에디터픽은 둘 다 author_device_id가 NULL이라(실제 기기가 없음) INNER
+    // JOIN이면 통째로 사라진다. LEFT JOIN + COALESCE(dp.nickname,
+    // ep.author_label)로 바꿔서, 기기가 있으면 기기 닉네임을, 없으면
+    // 관리자가 지정한 author_label을 닉네임으로 쓴다. 실제 사용자 글은
+    // author_device_id가 항상 있으므로 동작에 변화가 없다.
+    //
+    // is_admin_authored(=author_device_id IS NULL)는 클라이언트가 "이 글은
+    // 관리자가 수정/삭제할 수 있는 글인가"를 판단하는 용도다 — 원본
+    // device_id는 여전히 내려주지 않고 불리언만 계산해서 준다.
     const rows = await sql`
-      SELECT ep.id, ep.body_ko AS body, ep.image_url, ep.link_url, ep.link_domain,
+      SELECT ep.id, ep.title_ko, ep.body_ko AS body, ep.image_url, ep.link_url,
+             ep.link_domain, ep.author_type,
              COALESCE(dp.nickname, ep.author_label) AS author_nickname,
-             dp.device_id AS author_device_id, ep.created_at
+             dp.device_id AS author_device_id,
+             (dp.device_id IS NULL) AS is_admin_authored,
+             ep.created_at
       FROM expert_picks ep
       LEFT JOIN device_principals dp ON dp.device_id = ep.author_device_id
-      WHERE ep.author_type = 'user' AND ep.status = 'visible'
+      WHERE ep.author_type IN ('user', 'editor') AND ep.status = 'visible'
         AND (${cursorId}::int IS NULL OR ep.id < ${cursorId}::int)
       ORDER BY ep.id DESC
       LIMIT 20
