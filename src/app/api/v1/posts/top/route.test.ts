@@ -15,7 +15,10 @@ test("top endpoint ranks purely by like_count, no manual ORDER BY overrides", ()
 
 test("top endpoint left-joins device_principals so editor rows (no author_device_id) still appear", () => {
   assert.match(routeSource, /LEFT JOIN device_principals dp ON dp\.device_id = ep\.author_device_id/);
-  assert.match(routeSource, /dp\.nickname AS author_nickname/);
+});
+
+test("top endpoint falls back to author_label when a post has no linked device", () => {
+  assert.match(routeSource, /COALESCE\(dp\.nickname, ep\.author_label\) AS author_nickname/);
 });
 
 test("top endpoint exposes a hashed author_key instead of the raw device id", () => {

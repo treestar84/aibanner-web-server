@@ -68,8 +68,13 @@ test("feed GET only returns visible user posts, never editor picks or hidden/rem
 });
 
 test("feed GET joins device_principals for a live nickname instead of reading a stored column", () => {
-  assert.match(routeSource, /JOIN device_principals dp ON dp\.device_id = ep\.author_device_id/);
-  assert.match(routeSource, /dp\.nickname AS author_nickname/);
+  assert.match(routeSource, /LEFT JOIN device_principals dp ON dp\.device_id = ep\.author_device_id/);
+});
+
+// 관리자가 /api/admin/community-posts로 device 없이 올린 테스트 글은
+// author_device_id가 NULL이라, INNER JOIN이면 통째로 사라진다.
+test("feed GET falls back to author_label when a post has no linked device (admin test posts)", () => {
+  assert.match(routeSource, /COALESCE\(dp\.nickname, ep\.author_label\) AS author_nickname/);
 });
 
 test("feed GET paginates by cursor on descending id", () => {

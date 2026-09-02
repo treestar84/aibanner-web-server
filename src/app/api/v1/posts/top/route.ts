@@ -14,11 +14,14 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(Number.parseInt(req.nextUrl.searchParams.get("limit") ?? "10", 10) || 10, 10);
 
     // author_nickname은 저장된 컬럼이 없다: user 글은 device_principals를 LEFT JOIN해
-    // 조회 시점 닉네임을 붙인다. editor 글은 author_device_id가 NULL이라 LEFT JOIN이 아니면
-    // (INNER JOIN이면) 편집자 글이 통째로 사라지므로 반드시 LEFT JOIN이어야 한다.
+    // 조회 시점 닉네임을 붙인다. editor 글, 그리고 관리자가 device 없이 올린
+    // 테스트 user 글은 author_device_id가 NULL이라 LEFT JOIN이 아니면
+    // (INNER JOIN이면) 통째로 사라지므로 반드시 LEFT JOIN이어야 한다.
+    // dp.nickname이 없을 때는(editor 글, 관리자 테스트 글) author_label로 대체한다.
     const rows = await sql`
       SELECT ep.id, ep.title_ko, ep.body_ko AS body, ep.image_url, ep.link_url, ep.link_domain,
-             ep.author_type, dp.nickname AS author_nickname, dp.device_id AS author_device_id,
+             ep.author_type, COALESCE(dp.nickname, ep.author_label) AS author_nickname,
+             dp.device_id AS author_device_id,
              COALESCE(cl.like_count, 0) AS like_count
       FROM expert_picks ep
       LEFT JOIN device_principals dp ON dp.device_id = ep.author_device_id

@@ -143,11 +143,18 @@ export async function GET(req: NextRequest) {
       cursorId = parsed;
     }
 
+    // 관리자가 /api/admin/community-posts로 테스트 삼아 올린 글은
+    // author_device_id가 NULL이라(실제 기기가 없음) INNER JOIN이면 통째로
+    // 사라진다. LEFT JOIN + COALESCE(dp.nickname, ep.author_label)로 바꿔서,
+    // 기기가 있으면 기기 닉네임을, 없으면 관리자가 지정한 author_label을
+    // 닉네임으로 쓴다. 실제 사용자 글은 author_device_id가 항상 있으므로
+    // 동작에 변화가 없다.
     const rows = await sql`
       SELECT ep.id, ep.body_ko AS body, ep.image_url, ep.link_url, ep.link_domain,
-             dp.nickname AS author_nickname, dp.device_id AS author_device_id, ep.created_at
+             COALESCE(dp.nickname, ep.author_label) AS author_nickname,
+             dp.device_id AS author_device_id, ep.created_at
       FROM expert_picks ep
-      JOIN device_principals dp ON dp.device_id = ep.author_device_id
+      LEFT JOIN device_principals dp ON dp.device_id = ep.author_device_id
       WHERE ep.author_type = 'user' AND ep.status = 'visible'
         AND (${cursorId}::int IS NULL OR ep.id < ${cursorId}::int)
       ORDER BY ep.id DESC

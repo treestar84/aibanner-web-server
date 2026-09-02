@@ -52,6 +52,50 @@ export async function rewriteExpertPick(
   return { title, body };
 }
 
+/// 커뮤니티 게시글(제목 없음, 본문만)용 다듬기. buildRewritePrompt와 달리
+/// title을 다루지 않는다 — 커뮤니티 글은 애초에 제목 없이 본문만 있는
+/// 데이터 모델(expert_picks.title_ko가 NULL인 author_type='user' 행)이라,
+/// 제목을 새로 지어내게 하면 스키마에 없는 필드를 요구하게 된다.
+export function buildCommunityRewritePrompt(
+  bodyKo: string,
+): { system: string; user: string } {
+  const system = [
+    "너는 커뮤니티 게시판 글쓰기를 돕는 다듬기 도구다. 아래 원문의 사실관계(숫자, 고유명사, 날짜, 인용된 발언의 취지)만 정확히 보존하고, 표현은 자연스럽게 다듬어라.",
+    "절대 하지 말 것: 원문에 없는 사실이나 주장을 새로 만들어내기, 문체를 과도하게 격식체로 바꾸기(커뮤니티 게시글다운 캐주얼한 어조 유지).",
+    "반드시 할 것: 맞춤법/띄어쓰기를 교정하고, 어색한 문장을 자연스럽게 다듬어라. 분량은 원문과 비슷하게 유지하라.",
+    '출력은 순수 JSON만: {"body": "..."} 다른 텍스트나 설명을 덧붙이지 마라.',
+  ].join(" ");
+  return { system, user: bodyKo };
+}
+
+export async function rewriteCommunityPost(
+  bodyKo: string,
+): Promise<{ body: string }> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+
+  const client = new OpenAI({ apiKey });
+  const model = process.env.OPENAI_MODEL ?? "gpt-4o";
+  const { system, user } = buildCommunityRewritePrompt(bodyKo);
+
+  const completion = await client.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    temperature: 0.4,
+    response_format: { type: "json_object" },
+  });
+
+  const raw = completion.choices[0]?.message?.content?.trim();
+  if (!raw) throw new Error("AI rewrite returned an empty result");
+  const parsed = JSON.parse(raw) as { body?: string };
+  const body = (parsed.body ?? "").trim();
+  if (!body) throw new Error("AI rewrite returned an incomplete result");
+  return { body };
+}
+
 export async function translateExpertPickBody(
   bodyKo: string,
 ): Promise<{ titleEn: string; bodyEn: string }> {
