@@ -129,60 +129,129 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// 에디터픽(관리자가 제목까지 갖춰 직접 발행하는 콘텐츠)을 별도 화면이
+// 아니라 이 커뮤니티 피드 안의 한 카테고리로 통합한다 — author_type 필터가
+// 'user'만이 아니라 'user'/'editor' 둘 다다. title_ko/author_type도 함께
+// 내려줘야 클라이언트가 에디터픽 항목에 제목/배지를 보여줄 수 있다.
+//
+// 관리자가 /api/admin/community-posts로 테스트 삼아 올린 글, 그리고
+// 에디터픽은 둘 다 author_device_id가 NULL이라(실제 기기가 없음) INNER
+// JOIN이면 통째로 사라진다. LEFT JOIN + COALESCE(dp.nickname,
+// ep.author_label)로 바꿔서, 기기가 있으면 기기 닉네임을, 없으면 관리자가
+// 지정한 author_label을 닉네임으로 쓴다. 실제 사용자 글은 author_device_id가
+// 항상 있으므로 동작에 변화가 없다.
+//
+// is_admin_authored(=author_device_id IS NULL)는 클라이언트가 "이 글은
+// 관리자가 수정/삭제할 수 있는 글인가"를 판단하는 용도다 — 원본 device_id는
+// 여전히 내려주지 않고 불리언만 계산해서 준다.
+//
+// 이 세 쿼리(latest/likes/views)는 WHERE 절 앞부분(author_type IN (...)
+// AND status = 'visible')이 겹친다. @neondatabase/serverless의 sql
+// 템플릿 함수는 postgres.js와 달리 조각(fragment)을 다른 템플릿에
+// 끼워 넣는 조합을 지원한다고 문서화돼 있지 않아, 안전하게 그냥 각
+// 쿼리에 조건을 그대로 반복해서 썼다.
+
 export async function GET(req: NextRequest) {
   try {
-    // 커서는 숫자여야 한다. 검증 없이 parseInt하면 ?cursor=abc가 NaN이 되어
-    // 그대로 쿼리 파라미터로 나가고, 500이나 예상 밖 결과로 이어진다.
-    const cursor = req.nextUrl.searchParams.get("cursor");
-    let cursorId: number | null = null;
-    if (cursor !== null && cursor !== "") {
-      const parsed = Number.parseInt(cursor, 10);
-      if (!Number.isFinite(parsed)) {
-        return NextResponse.json({ error: "cursor must be an integer" }, { status: 400 });
-      }
-      cursorId = parsed;
+    const sortParam = req.nextUrl.searchParams.get("sort") ?? "latest";
+    if (sortParam !== "latest" && sortParam !== "likes" && sortParam !== "views") {
+      return NextResponse.json(
+        { error: "sort must be 'latest', 'likes', or 'views'" },
+        { status: 400 },
+      );
     }
 
-    // 에디터픽(관리자가 제목까지 갖춰 직접 발행하는 콘텐츠)을 별도 화면이
-    // 아니라 이 커뮤니티 피드 안의 한 카테고리로 통합한다 — author_type
-    // 필터를 'user'만에서 'user'/'editor' 둘 다로 넓혔다. title_ko도 함께
-    // 내려줘야 클라이언트가 에디터픽 항목에 제목을 보여줄 수 있다.
-    //
-    // 관리자가 /api/admin/community-posts로 테스트 삼아 올린 글, 그리고
-    // 에디터픽은 둘 다 author_device_id가 NULL이라(실제 기기가 없음) INNER
-    // JOIN이면 통째로 사라진다. LEFT JOIN + COALESCE(dp.nickname,
-    // ep.author_label)로 바꿔서, 기기가 있으면 기기 닉네임을, 없으면
-    // 관리자가 지정한 author_label을 닉네임으로 쓴다. 실제 사용자 글은
-    // author_device_id가 항상 있으므로 동작에 변화가 없다.
-    //
-    // is_admin_authored(=author_device_id IS NULL)는 클라이언트가 "이 글은
-    // 관리자가 수정/삭제할 수 있는 글인가"를 판단하는 용도다 — 원본
-    // device_id는 여전히 내려주지 않고 불리언만 계산해서 준다.
-    const rows = await sql`
-      SELECT ep.id, ep.title_ko, ep.body_ko AS body, ep.image_url, ep.link_url,
-             ep.link_domain, ep.author_type,
-             COALESCE(dp.nickname, ep.author_label) AS author_nickname,
-             dp.device_id AS author_device_id,
-             (dp.device_id IS NULL) AS is_admin_authored,
-             ep.created_at
-      FROM expert_picks ep
-      LEFT JOIN device_principals dp ON dp.device_id = ep.author_device_id
-      WHERE ep.author_type IN ('user', 'editor') AND ep.status = 'visible'
-        AND (${cursorId}::int IS NULL OR ep.id < ${cursorId}::int)
-      ORDER BY ep.id DESC
-      LIMIT 20
-    `;
-    // author_device_id는 클라이언트에 원본 그대로 내려주지 않는다 — 대신
-    // 클라이언트가 "이 작성자 차단"에 쓸 수 있는 안정적인 익명 해시 키로
-    // 바꿔치기한다(authorKeyFor 문서 참고).
-    const items = rows.map(({ author_device_id, ...rest }) => ({
-      ...rest,
-      author_key: authorKeyFor(author_device_id as string | null),
-    }));
-    return NextResponse.json({ items });
+    if (sortParam === "latest") {
+      // 커서는 숫자여야 한다. 검증 없이 parseInt하면 ?cursor=abc가 NaN이 되어
+      // 그대로 쿼리 파라미터로 나가고, 500이나 예상 밖 결과로 이어진다.
+      const cursor = req.nextUrl.searchParams.get("cursor");
+      let cursorId: number | null = null;
+      if (cursor !== null && cursor !== "") {
+        const parsed = Number.parseInt(cursor, 10);
+        if (!Number.isFinite(parsed)) {
+          return NextResponse.json({ error: "cursor must be an integer" }, { status: 400 });
+        }
+        cursorId = parsed;
+      }
+
+      const rows = await sql`
+        SELECT ep.id, ep.title_ko, ep.body_ko AS body, ep.image_url, ep.link_url,
+               ep.link_domain, ep.author_type,
+               COALESCE(dp.nickname, ep.author_label) AS author_nickname,
+               dp.device_id AS author_device_id,
+               (dp.device_id IS NULL) AS is_admin_authored,
+               ep.created_at
+        FROM expert_picks ep
+        LEFT JOIN device_principals dp ON dp.device_id = ep.author_device_id
+        WHERE ep.author_type IN ('user', 'editor') AND ep.status = 'visible'
+          AND (${cursorId}::int IS NULL OR ep.id < ${cursorId}::int)
+        ORDER BY ep.id DESC
+        LIMIT 20
+      `;
+      return NextResponse.json({ items: mapRows(rows) });
+    }
+
+    // sort='likes'|'views': "최근 30일" 콘텐츠로 한정한다 — 오래전에 쌓인
+    // 좋아요/조회수가 최신 활동을 영영 밀어내지 않도록. id 커서 대신 offset을
+    // 쓴다: 정렬 기준이 like_count/view_count라 id처럼 단조 증가하지 않아서
+    // "마지막으로 본 id보다 작은 것"이라는 커서 개념이 성립하지 않는다.
+    // 30일로 범위가 좁혀진 목록이라 offset 페이지네이션의 통상적인 단점
+    // (동시 삽입 시 밀림/중복)은 감내할 만하다고 판단했다.
+    const offsetParam = req.nextUrl.searchParams.get("offset");
+    let offset = 0;
+    if (offsetParam !== null && offsetParam !== "") {
+      const parsed = Number.parseInt(offsetParam, 10);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return NextResponse.json({ error: "offset must be a non-negative integer" }, { status: 400 });
+      }
+      offset = parsed;
+    }
+
+    const rows =
+      sortParam === "likes"
+        ? await sql`
+            SELECT ep.id, ep.title_ko, ep.body_ko AS body, ep.image_url, ep.link_url,
+                   ep.link_domain, ep.author_type,
+                   COALESCE(dp.nickname, ep.author_label) AS author_nickname,
+                   dp.device_id AS author_device_id,
+                   (dp.device_id IS NULL) AS is_admin_authored,
+                   ep.created_at, COALESCE(cl.like_count, 0) AS like_count
+            FROM expert_picks ep
+            LEFT JOIN device_principals dp ON dp.device_id = ep.author_device_id
+            LEFT JOIN content_likes cl ON cl.content_type = 'expertPicks' AND cl.content_id = ep.id::text
+            WHERE ep.author_type IN ('user', 'editor') AND ep.status = 'visible'
+              AND ep.created_at >= NOW() - INTERVAL '30 days'
+            ORDER BY like_count DESC, ep.id DESC
+            LIMIT 20 OFFSET ${offset}
+          `
+        : await sql`
+            SELECT ep.id, ep.title_ko, ep.body_ko AS body, ep.image_url, ep.link_url,
+                   ep.link_domain, ep.author_type,
+                   COALESCE(dp.nickname, ep.author_label) AS author_nickname,
+                   dp.device_id AS author_device_id,
+                   (dp.device_id IS NULL) AS is_admin_authored,
+                   ep.created_at, ep.view_count
+            FROM expert_picks ep
+            LEFT JOIN device_principals dp ON dp.device_id = ep.author_device_id
+            WHERE ep.author_type IN ('user', 'editor') AND ep.status = 'visible'
+              AND ep.created_at >= NOW() - INTERVAL '30 days'
+            ORDER BY ep.view_count DESC, ep.id DESC
+            LIMIT 20 OFFSET ${offset}
+          `;
+    return NextResponse.json({ items: mapRows(rows) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";
     console.error("[/api/v1/posts][GET]", err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+// author_device_id는 클라이언트에 원본 그대로 내려주지 않는다 — 대신
+// 클라이언트가 "이 작성자 차단"에 쓸 수 있는 안정적인 익명 해시 키로
+// 바꿔치기한다(authorKeyFor 문서 참고).
+function mapRows(rows: Record<string, unknown>[]) {
+  return rows.map(({ author_device_id, ...rest }) => ({
+    ...rest,
+    author_key: authorKeyFor(author_device_id as string | null),
+  }));
 }

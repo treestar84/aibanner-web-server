@@ -97,9 +97,55 @@ test("feed GET exposes a hashed author_key instead of the raw device id", () => 
   assert.match(routeSource, /import \{ authorKeyFor \} from "@\/lib\/author-key"/);
   assert.match(routeSource, /dp\.device_id AS author_device_id/);
   assert.match(routeSource, /author_key: authorKeyFor\(author_device_id as string \| null\)/);
-  // author_device_id는 응답 items에 그대로 남아있으면 안 된다 — map에서 걷어낸다.
-  assert.match(routeSource, /const items = rows\.map\(\(\{ author_device_id, \.\.\.rest \}\)/);
-  assert.match(routeSource, /NextResponse\.json\(\{ items \}\);/);
+  // author_device_id는 응답 items에 그대로 남아있으면 안 된다 — 공용 mapRows()
+  // 헬퍼가 걷어낸다(세 sort 분기가 모두 이 헬퍼를 거친다).
+  assert.match(routeSource, /function mapRows\(rows: Record<string, unknown>\[\]\)/);
+  assert.match(routeSource, /rows\.map\(\(\{ author_device_id, \.\.\.rest \}\)/);
+  // 'latest' 분기 하나, likes/views 삼항 분기가 공유하는 반환문 하나 —
+  // 두 곳 모두 mapRows()를 거친다.
+  const occurrences = routeSource.match(/NextResponse\.json\(\{ items: mapRows\(rows\) \}\);/g) ?? [];
+  assert.equal(occurrences.length, 2, "both the latest branch and the likes/views branch must go through mapRows");
+});
+
+test("feed GET rejects an unknown sort value with 400", () => {
+  assert.match(
+    routeSource,
+    /sortParam !== "latest" && sortParam !== "likes" && sortParam !== "views"/,
+  );
+  assert.match(routeSource, /sort must be 'latest', 'likes', or 'views'/);
+});
+
+test("feed GET defaults to sort=latest when the param is absent", () => {
+  assert.match(routeSource, /const sortParam = req\.nextUrl\.searchParams\.get\("sort"\) \?\? "latest";/);
+});
+
+// 좋아요/조회수는 오래된 글이 좋아요를 누적해 최신 활동을 영영 밀어내지
+// 않도록 최근 30일 콘텐츠로만 한정한다. 최신순(기본)은 전체 기간을 그대로
+// 보여준다 — 이 제한은 좋아요/조회수 정렬에만 적용돼야 한다.
+test("sort=likes and sort=views are both scoped to the last 30 days, latest is not", () => {
+  const occurrences = routeSource.match(/ep\.created_at >= NOW\(\) - INTERVAL '30 days'/g) ?? [];
+  assert.equal(occurrences.length, 2, "both the likes and views branches need the 30-day filter");
+});
+
+test("sort=likes ranks by like_count and joins content_likes the same way /posts/top does", () => {
+  assert.match(
+    routeSource,
+    /LEFT JOIN content_likes cl ON cl\.content_type = 'expertPicks' AND cl\.content_id = ep\.id::text/,
+  );
+  assert.match(routeSource, /ORDER BY like_count DESC, ep\.id DESC/);
+});
+
+test("sort=views ranks by view_count", () => {
+  assert.match(routeSource, /ep\.created_at, ep\.view_count/);
+  assert.match(routeSource, /ORDER BY ep\.view_count DESC, ep\.id DESC/);
+});
+
+// like_count/view_count 순위는 id처럼 단조 증가하지 않아 cursor 개념이
+// 성립하지 않는다 — offset 기반 페이지네이션을 쓴다.
+test("sort=likes/views paginate via offset, not the id cursor", () => {
+  assert.match(routeSource, /const offsetParam = req\.nextUrl\.searchParams\.get\("offset"\);/);
+  assert.match(routeSource, /offset must be a non-negative integer/);
+  assert.match(routeSource, /LIMIT 20 OFFSET \$\{offset\}/g);
 });
 
 // I7: 두 핸들러 모두 이 저장소 표준인 바깥쪽 try/catch가 없었다.
