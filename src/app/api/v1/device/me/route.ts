@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sql } from "@/lib/db/client";
 import { requirePostToken } from "@/lib/post-token-auth";
 import { computeTier, daysSince, TIER_POINT_THRESHOLDS } from "@/lib/tier";
 import { awardPoints } from "@/lib/points-ledger";
+import { kstMidnightUtc, postingAvailability } from "@/lib/posting-availability";
 
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -18,15 +20,32 @@ export async function GET(req: NextRequest) {
     // requirePostToken 시점의 stale한 auth.pointsTotal 대신 이 값을 신뢰한다.
     const { newTotal } = await awardPoints(auth.deviceId, "attendance");
 
-    const tier = computeTier(auth.firstSeenAt, newTotal);
+    const now = new Date();
+    const tier = computeTier(auth.firstSeenAt, newTotal, now);
     const nextThreshold = TIER_POINT_THRESHOLDS[tier] ?? null; // tier가 5면 null(최고 등급)
+    const todayStart = kstMidnightUtc(now);
+    const countRows = await sql`
+      SELECT COUNT(*)::int AS post_count
+      FROM expert_picks
+      WHERE author_device_id = ${auth.deviceId}
+        AND author_type = 'user'
+        AND created_at >= ${todayStart.toISOString()}
+    `;
+    const availability = postingAvailability(
+      auth.firstSeenAt,
+      tier,
+      auth.lastPostAt,
+      Number(countRows[0]?.post_count ?? 0),
+      now,
+    );
 
     return NextResponse.json({
       nickname: auth.nickname,
       tier,
       pointsTotal: newTotal,
       pointsToNextTier: nextThreshold !== null ? Math.max(0, nextThreshold - newTotal) : 0,
-      joinedDaysAgo: daysSince(auth.firstSeenAt, new Date()),
+      joinedDaysAgo: daysSince(auth.firstSeenAt, now),
+      ...availability,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";

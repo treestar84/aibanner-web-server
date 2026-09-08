@@ -15,9 +15,25 @@ test("device/me awards attendance points on every call, relying on points-ledger
 
 test("response uses the post-award points total, not the stale value from requirePostToken", () => {
   assert.match(routeSource, /const \{ newTotal \} = await awardPoints/);
-  assert.match(routeSource, /computeTier\(auth\.firstSeenAt, newTotal\)/);
+  assert.match(routeSource, /computeTier\(auth\.firstSeenAt, newTotal, now\)/);
   assert.match(routeSource, /pointsTotal: newTotal/);
   assert.doesNotMatch(routeSource, /computeTier\(auth\.firstSeenAt, auth\.pointsTotal\)/);
+});
+
+test("posting availability counts all of today's user posts in KST, including removed posts", () => {
+  assert.match(routeSource, /kstMidnightUtc\(now\)/);
+  assert.match(routeSource, /COUNT\(\*\)::int AS post_count/);
+  assert.match(routeSource, /author_device_id = \$\{auth\.deviceId\}/);
+  assert.match(routeSource, /author_type = 'user'/);
+  assert.match(routeSource, /created_at >= \$\{todayStart\.toISOString\(\)\}/);
+  assert.doesNotMatch(routeSource, /status = 'visible'/);
+});
+
+test("device/me preserves profile fields and adds the posting availability fields", () => {
+  assert.match(routeSource, /nickname: auth\.nickname/);
+  assert.match(routeSource, /pointsTotal: newTotal/);
+  assert.match(routeSource, /joinedDaysAgo:/);
+  assert.match(routeSource, /\.\.\.availability/);
 });
 
 test("top tier (tier 5) reports no next threshold and zero points needed", () => {
