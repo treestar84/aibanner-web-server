@@ -71,6 +71,11 @@
 - `src/app/api/v1/trends/top/route.ts` 성공 응답 최상위에 `minSupportedVersion` 필드로 노출.
 - Flutter 쪽은 `package_info_plus`로 읽은 설치 버전과 비교(`lib/core/providers/update_required_provider.dart`)해 미달 시 업데이트 다이얼로그 표시. 서버 env를 올릴 때는 실제 배포된 최소 버전과 반드시 맞출 것 — 잘못 올리면 최신 버전 사용자까지 업데이트 다이얼로그를 보게 된다.
 
+## 9-1) 2026-07-22 파이프라인 개선
+- **신규 키워드 로컬라이즈 배치화**(`snapshot.ts`): Step 8 진입 전 pre-pass로 `findCachedKeyword`를 detailedRanked 전체에 대해 1회 병렬 조회(Map 확정) 후 `processKeyword`에 주입 — DB 재조회 제거. 캐시 미스(신규) 키워드 텍스트를 모아 `buildNewKeywordLocalizationMap()`으로 classify/translate/naturalize를 최대 4회 배치 호출로 처리(기존: 신규 키워드 1건당 최대 3회 순차 = 최대 3N회). `ensureLocalizedKeyword`는 프리배치 Map에 값이 있으면 재사용, 없으면 기존 단건 폴백 경로 그대로. 저장 결과(ko/en)는 항상 기존과 동일.
+- **Jina 실패 관측성**(`jina_reader.ts`): `fetchFullText` 실패를 사유별(HTTP 비2xx/`httpErr`, 타임아웃·네트워크 예외/`netErr`, 300자 미만/`tooShort`)로 구분해 `fetchTopSourceFullTexts` 최종 로그에 카운트로 노출. 반환 계약(실패=null, 폴백 보장)은 불변.
+- **`/api/v1/search` 캐시 헤더**: 200 응답(DB-hit/Tavily 폴백 모두)에 `cacheControlByMode(mode, "search")` → `public, s-maxage=30, stale-while-revalidate=15` 부여. 에러 응답에는 미부여. 배포 후 Vercel Edge에서 `x-vercel-cache: HIT` 확인됨.
+
 ## 9) 구현 갭/주의(현재 코드 기준)
 - `keyword_aliases` 테이블은 검색 join에 사용되며 스냅샷 처리 시 canonical/ko/en alias를 upsert함.
 - `snapshot.ts`의 수집 결과는 `SOURCE_PLANS` 배열 순서와 구조 분해 순서가 반드시 일치해야 함. 과거 12개 plan 대비 10개만 구조 분해해 `reddit`, `google_alerts` 결과가 유실되고 `techmeme`이 잘못 매핑되던 문제가 있었으므로, 신규 수집기 추가 시 이 주석과 테스트를 함께 확인.
