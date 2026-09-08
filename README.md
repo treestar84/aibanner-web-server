@@ -1,5 +1,12 @@
 # AI Trend Widget - Web Server
 
+> 로컬 기준 작업공간은
+> `/Users/treestar/dev/realtime-ai-trend-news/web-server`입니다. 같은 GitHub
+> 원격과 Vercel 프로젝트를 가리키는
+> `/Users/treestar/dev/aibanner-web-server`는 과거 중복 체크아웃이므로 그
+> 위치에서 수정·커밋·배포하지 않습니다. Flutter 저장소의
+> `docs/server-workspace.md`를 먼저 확인하세요.
+
 AI 트렌드 키워드를 수집/랭킹/요약해서 웹 화면과 API로 제공하는 Next.js 서버입니다.
 
 ## 사용자 입장에서 이 서비스로 할 수 있는 것

@@ -50,6 +50,37 @@ RSS 피드를 4개 티어로 분류합니다. 별도 API/RSS 수집기(Product H
 
 정상 동작 시 RSS와 API 수집기를 합쳐 수십~수백 개 아이템. 피드/API 가용성과 증분 윈도우에 따라 달라집니다.
 
+### RSS 소스 운영 점검
+
+DB나 유료 API를 사용하지 않는 읽기 전용 점검 CLI로 `RSS_FEEDS` 전체의 HTTP 응답,
+XML 파싱, 항목 수, 발행일 누락 수, 최신 발행 시각과 경과 시간을 확인할 수 있습니다.
+
+```bash
+cd web-server
+npm run health:sources
+npm run --silent health:sources -- --json > /tmp/source-health.json
+```
+
+기본값은 동시 요청 4개, 요청당 타임아웃 8초, 최근 관찰 구간 72시간, stale 기준
+14일입니다. 저빈도·주간 발행처가 최근 72시간 동안 새 글을 내지 않았더라도 최신 글이 stale
+기준 안이면 `no_recent`(피드는 정상)로 구분합니다. 운영 특성에 맞춰 다음처럼 조정할 수 있습니다.
+
+```bash
+npm run health:sources -- --concurrency 4 --timeout-ms 8000 --recent-hours 72 --stale-hours 336
+```
+
+상태 의미:
+
+- `healthy`: 최근 관찰 구간에 날짜가 있는 새 항목이 있음
+- `no_recent`: HTTP와 파싱은 정상이며 최신 글도 stale 기준 안이지만 최근 새 항목은 없음
+- `stale`: 최신 발행 시각이 stale 기준을 초과
+- `undated` / `empty`: 유효한 발행일이 없거나 피드가 비어 있음
+- `http_failure` / `parse_failure`: 요청 또는 XML 파싱 실패
+
+경고(`no_recent`, `stale`, `undated`, `empty`, 일부 날짜 누락)는 결과에 표시하지만 종료 코드는
+`0`입니다. HTTP/파싱 실패가 하나라도 있으면 종료 코드 `1`, 잘못된 CLI 옵션이나 도구 자체의
+치명적 오류는 `2`를 반환하므로 정기 점검과 알림에서 장애와 콘텐츠 경고를 분리할 수 있습니다.
+
 ### YouTube 추천 영상 수집 (`youtube_recommend_source.ts`)
 
 키워드 랭킹용 `youtube_source.ts`와 별개로, 앱의 YouTube 메뉴와 홈 YouTube 스트립에 쓰는 추천 영상 테이블을 갱신합니다.
