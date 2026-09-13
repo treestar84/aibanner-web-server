@@ -508,12 +508,40 @@ CREATE INDEX IF NOT EXISTS idx_expert_picks_enabled_sort
 CREATE INDEX IF NOT EXISTS idx_expert_picks_author
   ON expert_picks(author_device_id, author_type, created_at DESC);
 
--- 2026-09-13 스케일 점검: /posts 피드(latest 정렬)와 위젯이 호출하는
--- /posts/top이 status='visible' 필터 + 정렬을 인덱스 없이 수행하던 문제.
+-- 2026-09-13 스케일 점검, 2026-09-14 정정: 처음엔 "latest 정렬과 /posts/top의
+-- status='visible' 필터+정렬"을 이 인덱스가 커버한다고 잘못 적었다. 실제
+-- latest 정렬(posts/route.ts)은 ep.id로 정렬/커서 처리해 PK가 이미 담당하고
+-- 있어서 이 인덱스는 그 경로엔 안 쓰인다. status='visible' 단독 필터에는
+-- 여전히 유효하지만, 지금 이 인덱스만으로 실제 이득을 보는 쿼리는 없다 —
+-- status는 자주 안 바뀌는 컬럼이라 유지 비용은 낮으니 향후 created_at 정렬이
+-- 필요한 경로가 생길 때를 대비해 남겨둔다(적극 정당화되는 인덱스는 아님).
 CREATE INDEX IF NOT EXISTS idx_expert_picks_feed
   ON expert_picks(status, created_at DESC) WHERE status = 'visible';
+
+-- 2026-09-14 재점검 결과 이 인덱스는 재고 대상이다(아직 안 지웠음 — 사용자
+-- 확인 후 결정): (1) 실제 views 정렬 쿼리(posts/route.ts)는
+-- `created_at >= NOW() - INTERVAL '30 days'`도 함께 거는데 NOW()가 IMMUTABLE이
+-- 아니라 부분 인덱스 조건에 넣을 수 없어 이 인덱스로는 그 30일 창을 반영 못
+-- 한다. (2) 더 근본적으로 view_count 증가 경로(expert-pick-view-tracking.ts →
+-- getExpertPickById)가 author_type='editor'로 하드 필터링돼 있어 사용자 글은
+-- view_count가 영구히 0이다(정렬 대상 데이터 자체가 사실상 죽어 있음 —
+-- 이번 점검에서 새로 발견한 별개의 버그, 이 인덱스가 만든 문제는 아님).
+-- (3) view_count는 조회마다 바뀌는 핫 컬럼인데 이 인덱스 때문에 그 UPDATE가
+-- Postgres의 HOT(Heap-Only Tuple) 최적화를 못 타 조회수 갱신마다 인덱스까지
+-- 다시 쓰는 비용이 계속 든다. 읽기 이득은 의심스러운데 쓰기 비용은 확실히
+-- 크다 — DROP INDEX CONCURRENTLY IF EXISTS idx_expert_picks_views로 제거하는
+-- 걸 권장한다(단, view_count 버그를 먼저/함께 고칠지는 별도 판단 필요).
 CREATE INDEX IF NOT EXISTS idx_expert_picks_views
   ON expert_picks(view_count DESC) WHERE status = 'visible';
+
+-- 2026-09-14 추가(F1 수정): 위 점검 후 진행한 적대적 재검토에서, 포인트 배치
+-- (tier-demotion.ts)의 LIMIT+ORDER BY created_at ASC가 idx_expert_picks_feed를
+-- 타면서 오히려 "지급 완료된 글까지 매번 처음부터 다시 스캔"하는 역효과를
+-- 낸다는 게 드러났다(point_awarded_survival이 인덱스에 없어 힙 재확인 필요).
+-- 실제로 필요한 건 "아직 지급 안 한 글만" 담는, 지급될수록 작아지는 인덱스다.
+CREATE INDEX IF NOT EXISTS idx_expert_picks_survival_pending
+  ON expert_picks(created_at)
+  WHERE point_awarded_survival = FALSE AND author_type = 'user' AND status = 'visible';
 
 -- 익명화된 조회 중복 방지 토큰. IP나 원문 User-Agent는 저장하지 않는다.
 CREATE TABLE IF NOT EXISTS expert_pick_view_events (

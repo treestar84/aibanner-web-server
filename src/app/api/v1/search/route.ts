@@ -135,10 +135,21 @@ export async function GET(req: NextRequest) {
     // 나눠 쓸 수 있다 — Tavily fallback 1건당 OpenAI 호출을 1회로 줄인다
     // (2026-09-13 비용 점검). lang !== "ko"일 때는 원래도 번역을 안 했으므로
     // 동작 변화 없음.
+    //
+    // 2026-09-14 보강: q는 사용자 입력이라 개행이나 "1. " 같은 번호목록
+    // 패턴이 섞여 있으면, 프롬프트 안에서 제목들과 같은 번호목록에 들어갈 때
+    // 줄 파싱이 밀려 다른 제목들의 번역 결과까지 흔들 수 있다(합치기 전엔
+    // q 혼자 있는 호출이라 영향 범위가 자기 자신으로 한정됐었다). 프롬프트에
+    // 넣기 전에 공백류를 한 줄로 접어 줄 구조를 안정시킨다 — 표시용 폴백(q
+    // 원문)은 그대로 둔다.
     let translatedFallbackTitles = fallbackTitles;
     let fallbackKeyword = q;
     if (lang === "ko") {
-      const translated = await batchTranslateTitles([...fallbackTitles, q], "ko");
+      const safeQueryForTranslation = q.replace(/\s+/g, " ");
+      const translated = await batchTranslateTitles(
+        [...fallbackTitles, safeQueryForTranslation],
+        "ko"
+      );
       translatedFallbackTitles = translated.slice(0, fallbackTitles.length);
       fallbackKeyword = translated[fallbackTitles.length] ?? q;
     }

@@ -45,3 +45,13 @@ test("schema defines content_like_events dedup table with composite PK including
     /PRIMARY KEY \(content_type, content_id, viewer_hash\)/,
   );
 });
+
+// 2026-09-14: 적대적 재검토(F1)에서 발견 — LIMIT+ORDER BY created_at ASC로
+// 바뀐 포인트 배치 쿼리(tier-demotion.ts)가 지급 완료 글까지 매번 다시
+// 스캔하지 않으려면, "아직 지급 안 한 글만" 담는 부분 인덱스가 필수다.
+test("schema defines a partial index over only not-yet-awarded survival posts", () => {
+  assert.match(
+    schemaSource,
+    /CREATE INDEX IF NOT EXISTS idx_expert_picks_survival_pending\s*\n\s*ON expert_picks\(created_at\)\s*\n\s*WHERE point_awarded_survival = FALSE AND author_type = 'user' AND status = 'visible';/,
+  );
+});
