@@ -128,9 +128,20 @@ export async function GET(req: NextRequest) {
     const fallbackTitles = fallbackGroups.flatMap((group) =>
       group.items.map((item) => item.title)
     );
-    const translatedFallbackTitles = lang === "ko"
-      ? await batchTranslateTitles(fallbackTitles, "ko")
-      : fallbackTitles;
+
+    // 제목 번역 + 검색어 번역을 배치 호출 1회로 합친다. 원래는
+    // batchTranslateTitles를 별개로 두 번(제목 목록 1회 + 검색어 1회) 불렀는데,
+    // 같은 배열 끝에 검색어를 붙여 한 번에 보내도 순서만 지키면 결과를 그대로
+    // 나눠 쓸 수 있다 — Tavily fallback 1건당 OpenAI 호출을 1회로 줄인다
+    // (2026-09-13 비용 점검). lang !== "ko"일 때는 원래도 번역을 안 했으므로
+    // 동작 변화 없음.
+    let translatedFallbackTitles = fallbackTitles;
+    let fallbackKeyword = q;
+    if (lang === "ko") {
+      const translated = await batchTranslateTitles([...fallbackTitles, q], "ko");
+      translatedFallbackTitles = translated.slice(0, fallbackTitles.length);
+      fallbackKeyword = translated[fallbackTitles.length] ?? q;
+    }
     let titleCursor = 0;
 
     const grouped = fallbackGroups.map((group) => ({
@@ -151,9 +162,6 @@ export async function GET(req: NextRequest) {
       tavilySources.social[0]?.snippet ??
       tavilySources.data[0]?.snippet ??
       "";
-    const fallbackKeyword = lang === "ko"
-      ? (await batchTranslateTitles([q], "ko"))[0] ?? q
-      : q;
 
     return NextResponse.json(
       {
