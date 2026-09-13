@@ -499,6 +499,22 @@ ALTER TABLE expert_picks ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAU
 CREATE INDEX IF NOT EXISTS idx_expert_picks_enabled_sort
   ON expert_picks(enabled, sort_order DESC, created_at DESC);
 
+-- 2026-09-13 스케일 점검: 게시 빈도 게이트(posts/route.ts)와 /posts/mine이
+-- author_device_id로 매 요청 필터링하는데 인덱스가 없어 사용자 글이 쌓일수록
+-- 전체 스캔이 된다. 프로덕션에는 CONCURRENTLY로 이미 적용됨(락 없이) —
+-- 이 문장은 신규/로컬 환경 부트스트랩용이라 CONCURRENTLY 불필요(스키마
+-- 초기화 시점엔 테이블이 비어 있고, migrate.ts가 쓰는 pooled 연결에서
+-- CONCURRENTLY가 트랜잭션 풀링과 충돌할 수 있어 일부러 뺐다).
+CREATE INDEX IF NOT EXISTS idx_expert_picks_author
+  ON expert_picks(author_device_id, author_type, created_at DESC);
+
+-- 2026-09-13 스케일 점검: /posts 피드(latest 정렬)와 위젯이 호출하는
+-- /posts/top이 status='visible' 필터 + 정렬을 인덱스 없이 수행하던 문제.
+CREATE INDEX IF NOT EXISTS idx_expert_picks_feed
+  ON expert_picks(status, created_at DESC) WHERE status = 'visible';
+CREATE INDEX IF NOT EXISTS idx_expert_picks_views
+  ON expert_picks(view_count DESC) WHERE status = 'visible';
+
 -- 익명화된 조회 중복 방지 토큰. IP나 원문 User-Agent는 저장하지 않는다.
 CREATE TABLE IF NOT EXISTS expert_pick_view_events (
   expert_pick_id INTEGER     NOT NULL,
@@ -604,6 +620,12 @@ CREATE TABLE IF NOT EXISTS device_principals (
   banned_permanently BOOLEAN NOT NULL DEFAULT FALSE,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 2026-09-13 스케일 점검: post-token-auth.ts의 requirePostToken(글쓰기/신고/
+-- 내글/기기정보 등 인증이 필요한 모든 경로)이 post_token_hash로 매번
+-- 조회하는데 인덱스가 없어 전체 스캔이었다. 사실상 유니크 값이라 UNIQUE로.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_device_principals_token_hash
+  ON device_principals(post_token_hash);
 
 CREATE TABLE IF NOT EXISTS point_ledger (
   id            BIGSERIAL PRIMARY KEY,
