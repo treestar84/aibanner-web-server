@@ -9,16 +9,18 @@ test("both handlers require admin auth", () => {
   assert.equal(matches.length, 2, "PUT and DELETE both need the admin gate");
 });
 
-test("PUT only touches posts with no linked device (editor picks + admin test posts)", () => {
+test("PUT can edit any visible post, including real user posts (admin has full editorial control)", () => {
   const putFn = routeSource.match(/export async function PUT[\s\S]*?\n}\n/)![0];
-  assert.match(putFn, /WHERE id = \$\{postId\} AND author_device_id IS NULL AND status = 'visible'/);
+  assert.match(putFn, /WHERE id = \$\{postId\} AND status = 'visible'/);
+  assert.doesNotMatch(putFn, /author_device_id IS NULL/);
 });
 
-test("DELETE only touches posts with no linked device, and soft-deletes rather than hard-deleting", () => {
+test("DELETE can remove any visible post, and soft-deletes rather than hard-deleting", () => {
   const deleteFn = routeSource.match(/export async function DELETE[\s\S]*?\n}\n/)![0];
   assert.match(deleteFn, /UPDATE expert_picks SET status = 'removed_by_admin'/);
-  assert.match(deleteFn, /WHERE id = \$\{postId\} AND author_device_id IS NULL AND status = 'visible'/);
+  assert.match(deleteFn, /WHERE id = \$\{postId\} AND status = 'visible'/);
   assert.doesNotMatch(deleteFn, /DELETE FROM expert_picks/);
+  assert.doesNotMatch(deleteFn, /author_device_id IS NULL/);
 });
 
 test("PUT rejects a missing/empty body the same way the composer endpoints do", () => {

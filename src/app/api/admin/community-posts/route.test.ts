@@ -28,6 +28,28 @@ test("authorLabel is admin-supplied free text with a length cap and a default fa
   assert.match(routeSource, /const authorLabel = authorLabelRaw \|\| "관리자\(테스트\)"/);
 });
 
-test("the row is inserted as author_type='user' with no device and no title, so it renders in the real community feed", () => {
-  assert.match(routeSource, /VALUES\s*\(\s*\n\s*NULL, \$\{bodyKo\}, \$\{bodyKo\}, 'user', NULL,/);
+test("the row is inserted as author_type='user' with no device, so it renders in the real community feed", () => {
+  assert.match(routeSource, /VALUES\s*\(\s*\n\s*\$\{titleKo\}, \$\{bodyKo\}, \$\{bodyKo\}, 'user', NULL,/);
+});
+
+test("title is optional on create — empty/missing input stores title_ko = NULL", () => {
+  assert.match(routeSource, /const titleKo = titleRaw\.length > 0 \? titleRaw : null;/);
+});
+
+test("GET requires admin auth and lists all visible posts regardless of author type", () => {
+  const getFn = routeSource.match(/export async function GET[\s\S]*?\n}\n/)![0];
+  assert.match(getFn, /requireAdminRequest\(req\)/);
+  assert.match(getFn, /WHERE status = 'visible'/);
+  assert.doesNotMatch(getFn, /author_type = 'editor'/);
+});
+
+test("GET supports an optional q search over title and body", () => {
+  const getFn = routeSource.match(/export async function GET[\s\S]*?\n}\n/)![0];
+  assert.match(getFn, /body_ko ILIKE/);
+  assert.match(getFn, /title_ko ILIKE/);
+});
+
+test("GET caps the result count with LIST_LIMIT", () => {
+  assert.match(routeSource, /const LIST_LIMIT = \d+/);
+  assert.match(routeSource, /LIMIT \$\{LIST_LIMIT\}/);
 });

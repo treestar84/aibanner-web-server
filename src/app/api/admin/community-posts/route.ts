@@ -8,6 +8,46 @@ export const revalidate = 0;
 
 const MAX_BODY_LENGTH = 1000;
 const MAX_AUTHOR_LABEL_LENGTH = 40;
+const MAX_TITLE_LENGTH = 100;
+const LIST_LIMIT = 100;
+
+// 관리자가 커뮤니티 피드 전체(에디터픽 + 관리자 테스트글 + 실제 사용자 글)를
+// 훑어보고 수정 대상을 고를 수 있게 하는 목록 API. /api/admin/posts/reported와
+// 달리 신고 여부와 무관하게 최신순으로 전부 보여준다 — "완전 편집" UI는
+// 신고되지 않은 글도 고칠 수 있어야 하기 때문. 삭제된 글(status !=
+// 'visible')은 편집 대상이 아니므로 제외한다.
+export async function GET(req: NextRequest) {
+  try {
+    const authError = await requireAdminRequest(req);
+    if (authError) return authError;
+
+    const url = new URL(req.url);
+    const q = url.searchParams.get("q")?.trim() ?? "";
+
+    const rows = q
+      ? await sql`
+          SELECT id, title_ko, body_ko, image_url, link_url, link_domain,
+                 author_type, author_device_id, author_label, created_at, updated_at, version
+          FROM expert_picks
+          WHERE status = 'visible' AND (body_ko ILIKE ${"%" + q + "%"} OR title_ko ILIKE ${"%" + q + "%"})
+          ORDER BY created_at DESC
+          LIMIT ${LIST_LIMIT}
+        `
+      : await sql`
+          SELECT id, title_ko, body_ko, image_url, link_url, link_domain,
+                 author_type, author_device_id, author_label, created_at, updated_at, version
+          FROM expert_picks
+          WHERE status = 'visible'
+          ORDER BY created_at DESC
+          LIMIT ${LIST_LIMIT}
+        `;
+
+    return NextResponse.json({ items: rows, count: rows.length });
+  } catch (err) {
+    console.error("[/api/admin/community-posts][GET]", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
 
 // 관리자가 "일반 사용자 글쓰기"를 테스트하기 위한 전용 엔드포인트.
 //
@@ -40,6 +80,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // title은 선택 — 안 보내거나 빈 문자열이면 기존과 동일하게 제목 없는
+    // 글로 저장된다(title_ko = NULL). PUT(수정)이 title을 지원하는 것과
+    // 맞춰, 생성 시점부터 제목 있는 관리자 글도 만들 수 있게 한다.
+    const titleRaw = typeof body?.title === "string" ? body.title.trim() : "";
+    if (titleRaw.length > MAX_TITLE_LENGTH) {
+      return NextResponse.json(
+        { error: `title exceeds ${MAX_TITLE_LENGTH} characters` },
+        { status: 400 },
+      );
+    }
+    const titleKo = titleRaw.length > 0 ? titleRaw : null;
+
     const imageUrl = typeof body?.imageUrl === "string" ? body.imageUrl.trim() : "";
     if (imageUrl && !isAllowedBlobImageUrl(imageUrl)) {
       return NextResponse.json(
@@ -63,7 +115,7 @@ export async function POST(req: NextRequest) {
         author_label, image_url, sort_order, enabled
       )
       VALUES (
-        NULL, ${bodyKo}, ${bodyKo}, 'user', NULL,
+        ${titleKo}, ${bodyKo}, ${bodyKo}, 'user', NULL,
         ${authorLabel}, ${imageUrl}, 0, true
       )
       RETURNING id
