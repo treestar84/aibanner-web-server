@@ -1,5 +1,6 @@
 import type { PrimaryType } from "./source_category";
 import { SNIPPET_MAX_CHARS } from "./snippet_policy";
+import { recordDiagnostic, diagnosticFailure } from "./diagnostics";
 
 type SourceType = PrimaryType;
 
@@ -139,11 +140,17 @@ async function fetchNaverSearch(
   type: SourceType,
   display: number
 ): Promise<NaverSource[]> {
-  if (display <= 0) return [];
+  if (display <= 0) {
+    recordDiagnostic("search_naver", "skipped");
+    return [];
+  }
 
   const clientId = process.env.NAVER_CLIENT_ID;
   const clientSecret = process.env.NAVER_CLIENT_SECRET;
-  if (!NAVER_SEARCH_ENABLED || !clientId || !clientSecret) return [];
+  if (!NAVER_SEARCH_ENABLED || !clientId || !clientSecret) {
+    recordDiagnostic("search_naver", "disabled");
+    return [];
+  }
 
   const url = new URL(`https://openapi.naver.com/v1/search/${endpoint}.json`);
   url.searchParams.set("query", keyword);
@@ -151,6 +158,7 @@ async function fetchNaverSearch(
   url.searchParams.set("start", "1");
   url.searchParams.set("sort", "date");
 
+  const diagnosticStarted = Date.now();
   try {
     const res = await fetch(url, {
       headers: {
@@ -158,13 +166,19 @@ async function fetchNaverSearch(
         "X-Naver-Client-Secret": clientSecret,
       },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      recordDiagnostic("search_naver", "http_error", { requestCount: 1, maxHttpStatus: res.status, durationMs: Date.now() - diagnosticStarted });
+      return [];
+    }
 
     const data = (await res.json()) as NaverSearchResponse;
-    return (data.items ?? [])
+    const sources = (data.items ?? [])
       .map((item) => toSource(item, type))
       .filter((source): source is NaverSource => source != null);
-  } catch {
+    recordDiagnostic("search_naver", sources.length ? "ok" : "empty", { requestCount: 1, outputCount: sources.length, durationMs: Date.now() - diagnosticStarted });
+    return sources;
+  } catch (error) {
+    recordDiagnostic("search_naver", diagnosticFailure(error), { requestCount: 1, durationMs: Date.now() - diagnosticStarted });
     return [];
   }
 }

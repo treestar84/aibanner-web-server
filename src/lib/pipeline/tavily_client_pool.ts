@@ -1,4 +1,5 @@
 import { tavily } from "@tavily/core";
+import { recordDiagnostic, diagnosticFailure } from "./diagnostics";
 
 export type TavilyFailureKind = "quota" | "rate_limit" | "other";
 
@@ -82,9 +83,13 @@ export async function fetchTavilySearch(
   cooldown: { readonly maxKeyAttempts: number; readonly rateLimitMinutes: number; readonly quotaHours: number }
 ): Promise<readonly TavilySearchResult[]> {
   const attempts = getTavilyKeyAttempts(cooldown.maxKeyAttempts);
-  if (attempts.length === 0) return [];
+  if (attempts.length === 0) {
+    recordDiagnostic("search_tavily", "skipped");
+    return [];
+  }
 
   for (const { apiKey, client } of attempts) {
+    const diagnosticStarted = Date.now();
     try {
       const res = await client.search(query, {
         searchDepth: "basic",
@@ -92,9 +97,15 @@ export async function fetchTavilySearch(
         timeRange: options.timeRange,
         includeImages: false,
       });
+      recordDiagnostic("search_tavily", res.results.length ? "ok" : "empty", {
+        requestCount: 1, outputCount: res.results.length, durationMs: Date.now() - diagnosticStarted,
+      });
       return res.results;
     } catch (error) {
       const failureKind = classifyTavilyFailure(error);
+      recordDiagnostic("search_tavily", failureKind === "other" ? diagnosticFailure(error) : failureKind, {
+        requestCount: 1, durationMs: Date.now() - diagnosticStarted,
+      });
       if (failureKind !== "quota" && failureKind !== "rate_limit") {
         console.warn(`[tavily] Search failed for query "${query}": ${errorMessage(error)}`);
         return [];

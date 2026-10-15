@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { TavilySource } from "./tavily";
+import { recordDiagnostic, diagnosticFailure } from "./diagnostics";
 
 function cleanSummary(raw: string): string {
   return raw
@@ -214,6 +215,7 @@ export async function generateSummaries(
   const fullTextBlock = buildFullTextBlock(fullTexts);
   const userMessage = `Keyword: "${keyword}"${signalLine}\n\nContext:\n${context}${fullTextBlock}`;
   const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+  const diagnosticStarted = Date.now();
 
   try {
     const koPromise = client.chat.completions.create({
@@ -240,13 +242,17 @@ export async function generateSummaries(
 
     const [koRes, enRes] = await Promise.all([koPromise, enPromise]);
 
-    return {
+    const summaries = {
       ko: parseSummaryResponse(koRes.choices[0]?.message?.content ?? ""),
       en: enRes
         ? parseSummaryResponse(enRes.choices[0]?.message?.content ?? "")
         : { summary: "", bullets: [] },
     };
+    recordDiagnostic("summary", summaries.ko.summary ? "ok" : "empty", { summaryCharsKo: summaries.ko.summary.length, summaryCharsEn: summaries.en.summary.length, durationMs: Date.now() - diagnosticStarted });
+    return summaries;
   } catch (err) {
+    recordDiagnostic("summary", "fallback", { durationMs: Date.now() - diagnosticStarted });
+    recordDiagnostic("summary_failure", diagnosticFailure(err));
     console.warn(`[summarize] Failed for "${keyword}":`, err);
     return {
       ko: {

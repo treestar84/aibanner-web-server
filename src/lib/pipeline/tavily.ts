@@ -19,6 +19,7 @@ import { buildSearchQueryPlanViaLlm } from "./search_query_plan";
 import { filterByEventRelevance } from "./event_relevance_gate";
 import { SNIPPET_MAX_CHARS } from "./snippet_policy";
 import { exaSearch, isExaEnabled } from "./exa_source";
+import { recordDiagnostic, diagnosticFailure } from "./diagnostics";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,7 +101,8 @@ async function fetchByQuery(
       rateLimitMinutes: TAVILY_RATE_LIMIT_COOLDOWN_MINUTES,
       quotaHours: TAVILY_QUOTA_COOLDOWN_HOURS,
     });
-  } catch {
+  } catch (error) {
+    recordDiagnostic("search_dispatch", diagnosticFailure(error));
     results = [];
   }
 
@@ -111,6 +113,7 @@ async function fetchByQuery(
       maxResults: options.maxResults,
       timeRange: options.timeRange,
     });
+    recordDiagnostic("search_fallback", "fallback", { outputCount: exaResults.length });
     return exaResults.map((result) => ({
       title: result.title,
       url: result.url,
@@ -251,6 +254,9 @@ export async function collectSources(
     ...broadSeed,
   ]);
   const relevant = filterRelevantSources(merged, keyword);
+  recordDiagnostic("lexical_relevance", "ok", {
+    inputCount: merged.length, outputCount: relevant.length, droppedCount: merged.length - relevant.length,
+  });
 
   const originSources = eventContext ? toOriginSources(eventContext) : [];
   // plan이 있어도 event_summary가 비어 있으면 원본 기사 제목으로 폴백해 게이트가 항상 작동하게 한다.
@@ -264,6 +270,7 @@ export async function collectSources(
 
   // origin 소스(원본 기사)는 어휘 필터·이벤트 게이트를 거치지 않고 최우선으로 배치됩니다.
   const ordered = dedupeByUrl([...originSources, ...gated]);
+  recordDiagnostic("source_merge", "ok", { inputCount: originSources.length + gated.length, outputCount: ordered.length, duplicateUrls: originSources.length + gated.length - ordered.length, originCount: originSources.length });
 
   const limits: Record<SourceType, number> = {
     news: TAVILY_NEWS_RESULTS,

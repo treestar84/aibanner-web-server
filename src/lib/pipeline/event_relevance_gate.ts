@@ -2,6 +2,7 @@ import OpenAI from "openai";
 
 import { parsePositiveIntEnv } from "./tavily_client_pool";
 import type { TavilySource } from "./tavily";
+import { recordDiagnostic, diagnosticFailure } from "./diagnostics";
 
 export interface EventRelevanceScoreMap {
   readonly [index: string]: number;
@@ -44,10 +45,17 @@ export async function filterByEventRelevance(
   eventSummary: string,
   candidates: TavilySource[]
 ): Promise<TavilySource[]> {
-  if (!ENABLE_EVENT_RELEVANCE_GATE) return candidates;
-  if (eventSummary === "" || candidates.length === 0) return candidates;
+  if (!ENABLE_EVENT_RELEVANCE_GATE) {
+    recordDiagnostic("event_relevance", "disabled", { inputCount: candidates.length });
+    return candidates;
+  }
+  if (eventSummary === "" || candidates.length === 0) {
+    recordDiagnostic("event_relevance", "skipped", { inputCount: candidates.length });
+    return candidates;
+  }
 
   const client = new OpenAI();
+  const diagnosticStarted = Date.now();
 
   try {
     const response = await client.chat.completions.create({
@@ -79,10 +87,15 @@ Output STRICT JSON mapping index → score, e.g. {"0": 8, "1": 2}. Include ALL i
 
     const content = response.choices[0]?.message?.content ?? "{}";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return candidates;
+    if (!jsonMatch) {
+      recordDiagnostic("event_relevance", "invalid_response", { inputCount: candidates.length, outputCount: candidates.length, durationMs: Date.now() - diagnosticStarted });
+      return candidates;
+    }
 
     const scores = JSON.parse(jsonMatch[0]) as EventRelevanceScoreMap;
     const selected = selectByEventRelevance(candidates, scores, EVENT_RELEVANCE_MIN);
+    const missingScores = candidates.filter((_, index) => typeof scores[String(index)] !== "number" || Number.isNaN(scores[String(index)])).length;
+    recordDiagnostic("event_relevance", "ok", { inputCount: candidates.length, outputCount: selected.length, droppedCount: candidates.length - selected.length, missingScores, durationMs: Date.now() - diagnosticStarted });
 
     const selectedSet = new Set(selected);
     candidates.forEach((candidate, index) => {
@@ -95,6 +108,7 @@ Output STRICT JSON mapping index → score, e.g. {"0": 8, "1": 2}. Include ALL i
 
     return selected;
   } catch (err) {
+    recordDiagnostic("event_relevance", diagnosticFailure(err), { inputCount: candidates.length, outputCount: candidates.length, durationMs: Date.now() - diagnosticStarted });
     console.warn("[sources] Event relevance gate failed, skipping:", (err as Error).message);
     return candidates;
   }

@@ -1,4 +1,5 @@
 // Exa Search API 연동 — Tavily 검색 실패/빈 결과 시 폴백으로 사용한다.
+import { recordDiagnostic, diagnosticFailure } from "./diagnostics";
 
 export interface ExaResult {
   title: string;
@@ -41,8 +42,12 @@ export async function exaSearch(
   options: { maxResults: number; timeRange: "day" | "week" | "month" }
 ): Promise<ExaResult[]> {
   const apiKey = process.env.EXA_API_KEY;
-  if (!apiKey) return [];
+  if (!apiKey) {
+    recordDiagnostic("search_exa", "disabled");
+    return [];
+  }
 
+  const diagnosticStarted = Date.now();
   try {
     const res = await fetch("https://api.exa.ai/search", {
       method: "POST",
@@ -63,6 +68,7 @@ export async function exaSearch(
     });
 
     if (!res.ok) {
+      recordDiagnostic("search_exa", "http_error", { requestCount: 1, maxHttpStatus: res.status, durationMs: Date.now() - diagnosticStarted });
       console.warn(`[exa] search failed: HTTP ${res.status}`);
       return [];
     }
@@ -70,7 +76,7 @@ export async function exaSearch(
     const data = (await res.json()) as ExaApiResponse;
     const results = data.results ?? [];
 
-    return results
+    const selected = results
       .filter((r) => Boolean(r.url))
       .map((r) => ({
         title: r.title ?? "",
@@ -78,7 +84,10 @@ export async function exaSearch(
         content: r.text ?? "",
         publishedDate: r.publishedDate ?? null,
       }));
+    recordDiagnostic("search_exa", selected.length ? "ok" : "empty", { requestCount: 1, outputCount: selected.length, durationMs: Date.now() - diagnosticStarted });
+    return selected;
   } catch (error) {
+    recordDiagnostic("search_exa", diagnosticFailure(error), { requestCount: 1, durationMs: Date.now() - diagnosticStarted });
     console.warn(`[exa] search failed: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }

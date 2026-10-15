@@ -1,4 +1,5 @@
 import type { TavilySource } from "./tavily";
+import { recordDiagnostic, diagnosticFailure } from "./diagnostics";
 
 // ─── Env helpers ──────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ type FullTextFailureReason = "httpErr" | "netErr" | "tooShort" | null;
 async function fetchFullTextWithReason(
   url: string
 ): Promise<{ text: string | null; reason: FullTextFailureReason }> {
+  const diagnosticStarted = Date.now();
   try {
     const headers: Record<string, string> = {
       Accept: "text/plain",
@@ -55,16 +57,27 @@ async function fetchFullTextWithReason(
       signal: AbortSignal.timeout(12_000),
     });
 
-    if (!res.ok) return { text: null, reason: "httpErr" };
+    if (!res.ok) {
+      recordDiagnostic("fulltext", "http_error", { requestCount: 1, maxHttpStatus: res.status, durationMs: Date.now() - diagnosticStarted });
+      return { text: null, reason: "httpErr" };
+    }
 
     const raw = await res.text();
-    if (!raw || !raw.trim()) return { text: null, reason: "tooShort" };
+    if (!raw || !raw.trim()) {
+      recordDiagnostic("fulltext", "empty", { requestCount: 1, durationMs: Date.now() - diagnosticStarted });
+      return { text: null, reason: "tooShort" };
+    }
 
     const collapsed = raw.replace(/\n{3,}/g, "\n\n").trim();
-    if (!collapsed) return { text: null, reason: "tooShort" };
+    if (!collapsed) {
+      recordDiagnostic("fulltext", "empty", { requestCount: 1, durationMs: Date.now() - diagnosticStarted });
+      return { text: null, reason: "tooShort" };
+    }
 
+    recordDiagnostic("fulltext", "ok", { requestCount: 1, durationMs: Date.now() - diagnosticStarted });
     return { text: collapsed.slice(0, JINA_FULLTEXT_MAX_CHARS), reason: null };
-  } catch {
+  } catch (error) {
+    recordDiagnostic("fulltext", diagnosticFailure(error), { requestCount: 1, durationMs: Date.now() - diagnosticStarted });
     return { text: null, reason: "netErr" };
   }
 }
@@ -90,7 +103,10 @@ export async function fetchTopSourceFullTexts(
   sources: TavilySource[],
   maxCount = 2
 ): Promise<Array<{ url: string; domain: string; text: string }>> {
-  if (process.env.JINA_READER_ENABLED === "false") return [];
+  if (process.env.JINA_READER_ENABLED === "false") {
+    recordDiagnostic("fulltext_selection", "disabled");
+    return [];
+  }
 
   const skippedDomainCount = sources.filter((s) => shouldSkipSource(s)).length;
   const candidates = sources
@@ -98,6 +114,7 @@ export async function fetchTopSourceFullTexts(
     .slice(0, maxCount);
 
   if (candidates.length === 0) {
+    recordDiagnostic("fulltext_selection", "skipped", { inputCount: sources.length, skippedCount: skippedDomainCount });
     if (sources.length > 0) {
       console.log(
         `[jina] fetched 0/${sources.length} ok (skippedDomain=${skippedDomainCount}, tooShort=0, httpErr=0, netErr=0)`
@@ -154,5 +171,9 @@ export async function fetchTopSourceFullTexts(
     `[jina] fetched ${fetched.length}/${candidates.length + skippedDomainCount} ok (skippedDomain=${skippedDomainCount}, tooShort=${tooShort}, httpErr=${httpErr}, netErr=${netErr})`
   );
 
+  recordDiagnostic("fulltext_selection", fetched.length ? "ok" : "empty", {
+    inputCount: candidates.length, outputCount: fetched.length, skippedCount: skippedDomainCount,
+    droppedCount: tooShort,
+  });
   return fetched;
 }

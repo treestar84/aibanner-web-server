@@ -22,6 +22,7 @@ import type { ScoringProfile } from "./scoring";
 import type { PipelineMode } from "./mode";
 import { collectSources } from "./tavily";
 import { buildEventContext } from "./event_context";
+import { withPipelineDiagnostics, withKeywordDiagnostics, setDiagnosticSnapshot, recordDiagnostic, observeSources, diagnosticFailure } from "./diagnostics";
 import { generateSummaries, batchTranslateTitles, classifyKeywordType, naturalizeKeywordKo } from "./summarize";
 import type { KeywordLocaleAction } from "./summarize";
 import { fetchTopSourceFullTexts } from "./jina_reader";
@@ -364,6 +365,7 @@ async function collectWithIncrementalWindow(
   plan: SourcePlan,
   stateMap: Map<string, SourceIngestionState>
 ): Promise<RssItem[]> {
+  const diagnosticStarted = Date.now();
   const stateKey = `${profile.mode}:${plan.key}`;
   const windowHours = resolveIncrementalWindowHours(
     profile.sourceWindow,
@@ -391,8 +393,12 @@ async function collectWithIncrementalWindow(
     console.log(
       `[snapshot] [${profile.mode}] [source:${plan.key}] windowHours=${windowHours}, items=${items.length}`
     );
+    recordDiagnostic(`ingestion_${plan.key}`, items.length ? "ok" : "empty", {
+      outputCount: items.length, durationMs: Date.now() - diagnosticStarted,
+    });
     return items;
   } catch (err) {
+    recordDiagnostic(`ingestion_${plan.key}`, diagnosticFailure(err), { durationMs: Date.now() - diagnosticStarted });
     console.warn(
       `[snapshot] [${profile.mode}] [source:${plan.key}] Failed: ${(err as Error).message}`
     );
@@ -656,6 +662,10 @@ async function processKeyword(
     const localizedSources = await ensureLocalizedStoredSources(cached.sources);
     const primaryType = determinePrimaryType(localizedSources);
     const topSource = pickPrimarySource(localizedSources, primaryType, kw.keyword);
+    recordDiagnostic("cache", "reused", {
+      cacheSnapshotAgeHours: Math.max(0, Math.floor((Date.now() - Date.parse(cached.keyword.created_at)) / 3_600_000)),
+    });
+    observeSources(localizedSources, cached.keyword.summary_short, topSource?.url);
 
     console.log(`[snapshot] [REUSE] ${kw.keyword} (rank ${item.rank})`);
     await insertKeyword({
@@ -726,6 +736,7 @@ async function processKeyword(
     allowExternalEnrichmentForNewKeywords || forceExternalEnrichmentForKeyword;
 
   if (!allowExternalEnrichment) {
+    recordDiagnostic("enrichment", "disabled");
     const localizedKeyword = await ensureLocalizedKeyword(
       kw.keyword,
       undefined,
@@ -826,6 +837,7 @@ async function processKeyword(
   );
   const primaryType = determinePrimaryType(allSources);
   const topSource = pickPrimarySource(allSources, primaryType, kw.keyword);
+  observeSources(allSources, summaries.ko.summary, topSource?.url);
 
   // 소스 제목 번역 (배치)
   const sourceEntries = Object.entries(sourcesMap).flatMap(([type, typeItems]) =>
@@ -904,7 +916,7 @@ interface RunSnapshotPipelineOptions {
   mode?: PipelineMode;
 }
 
-export async function runSnapshotPipeline(
+async function runSnapshotPipelineInternal(
   _options: RunSnapshotPipelineOptions = {}
 ): Promise<{
   snapshotId: string;
@@ -1048,6 +1060,7 @@ export async function runSnapshotPipeline(
 
   // 이전 스냅샷 rank 조회
   const snapshotId = buildSnapshotId();
+  setDiagnosticSnapshot(snapshotId);
   const prevRankMap = prevSnapshot
     ? await getPreviousRanks(
         prevSnapshot.snapshot_id,
@@ -1148,6 +1161,7 @@ export async function runSnapshotPipeline(
       "[snapshot] No ranked keywords generated; aborting snapshot write to avoid empty snapshot."
     );
   }
+  recordDiagnostic("ranking", "ok", { inputCount: allItems.length, outputCount: finalRanked.length });
 
   // 6.5) 시뮬레이터용 후보 전체 저장
   try {
@@ -1236,7 +1250,7 @@ export async function runSnapshotPipeline(
       const forceExternalEnrichmentForKeyword = keywordLookupKeys(item).some(
         (key) => activeManualKeywordKeySet.has(key)
       );
-      return processKeyword(
+      return withKeywordDiagnostics(item.keyword.keywordId, () => processKeyword(
         item,
         snapshotId,
         DEFAULT_IMAGE,
@@ -1245,7 +1259,7 @@ export async function runSnapshotPipeline(
         allItems,
         cachedByKeywordId.get(item.keyword.keywordId) ?? null,
         localizationPrebatchMap
-      );
+      ));
     }
   );
 
@@ -1325,8 +1339,13 @@ export async function runSnapshotPipeline(
   }
 
   const elapsedMs = Date.now() - startedAt;
+  recordDiagnostic("publication", "ok", { keywordCount, reusedCount, durationMs: elapsedMs });
   console.log(
     `[snapshot] Pipeline complete: mode=${mode}, snapshotId=${snapshotId}, keywords=${keywordCount} (reused=${reusedCount}, new=${keywordCount - reusedCount}, lightweight=${lightweightCount}), elapsedMs=${elapsedMs}`
   );
   return { snapshotId, keywordCount, reusedCount, mode };
+}
+
+export async function runSnapshotPipeline(options: RunSnapshotPipelineOptions = {}) {
+  return withPipelineDiagnostics(() => runSnapshotPipelineInternal(options));
 }

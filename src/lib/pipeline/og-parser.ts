@@ -1,9 +1,15 @@
 import { load } from "cheerio";
+import { recordDiagnostic, diagnosticFailure, type DiagnosticOutcome } from "./diagnostics";
 
 const DEFAULT_IMAGE = "/images/default-thumbnail.png";
 const FETCH_TIMEOUT_MS = 5000;
 
 export async function extractOgImage(url: string): Promise<string> {
+  const diagnosticStarted = Date.now();
+  const observed = (image: string, outcome: DiagnosticOutcome, maxHttpStatus?: number): string => {
+    recordDiagnostic("image", outcome, { requestCount: 1, durationMs: Date.now() - diagnosticStarted, ...(maxHttpStatus ? { maxHttpStatus } : {}) });
+    return image;
+  };
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -17,18 +23,21 @@ export async function extractOgImage(url: string): Promise<string> {
     });
     clearTimeout(timer);
 
-    if (!res.ok) return DEFAULT_IMAGE;
+    if (!res.ok) return observed(DEFAULT_IMAGE, "http_error", res.status);
 
     const html = await res.text();
     const $ = load(html);
 
     // 1차: og:image
     const ogImage = $('meta[property="og:image"]').attr("content");
-    if (ogImage && isValidImageUrl(ogImage)) return ogImage;
+    if (ogImage && isValidImageUrl(ogImage)) return observed(ogImage, "og");
 
     // 2차: twitter:image
     const twitterImage = $('meta[name="twitter:image"]').attr("content");
-    if (twitterImage && isValidImageUrl(twitterImage)) return twitterImage;
+    if (twitterImage && isValidImageUrl(twitterImage)) return observed(twitterImage, "twitter");
+    if (ogImage?.startsWith("/") || twitterImage?.startsWith("/")) {
+      recordDiagnostic("image_candidates", "skipped", { relativeImageCandidates: 1 });
+    }
 
     // 3차: favicon
     const faviconLink =
@@ -36,12 +45,12 @@ export async function extractOgImage(url: string): Promise<string> {
       $('link[rel="shortcut icon"]').attr("href");
     if (faviconLink) {
       const absolute = toAbsoluteUrl(faviconLink, url);
-      if (absolute && isValidImageUrl(absolute)) return absolute;
+      if (absolute && isValidImageUrl(absolute)) return observed(absolute, "favicon");
     }
 
-    return DEFAULT_IMAGE;
-  } catch {
-    return DEFAULT_IMAGE;
+    return observed(DEFAULT_IMAGE, "default");
+  } catch (error) {
+    return observed(DEFAULT_IMAGE, diagnosticFailure(error));
   }
 }
 
