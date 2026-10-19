@@ -35,6 +35,9 @@ const RATE_LIMITS: [prefix: string, rpm: number][] = [
   ["/api/v1/posts/upload-image", 10],   // 이미지 업로드 — 일반 게시 엔드포인트보다 무거워 더 빡빡하게
   ["/api/v1/posts/top", 60],            // 인기 게시물 조회 — 읽기 전용
   ["/api/v1/posts", 20],                // 게시+피드 공용, 실제 게시 빈도는 post-gate.ts가 더 강하게 제한
+  ["/api/v1/receipts", 10],             // 영수증 발행 — 서버 일일 상한(20)과 별개로 burst 차단
+  ["/api/v1/flying/shares", 30],        // 공유 집계 — 콘텐츠당 하루 1회라 넉넉할 필요 없음
+  ["/r/", 20],                          // 공개 영수증 — 열람수 부풀리기 방지(IP당 모든 영수증 합산)
   ["/api/v1/", 100],          // 기타 v1 엔드포인트
   ["/api/mcp", 60],           // MCP 서버 — PlayMCP 등 게이트웨이 대비, env MCP_RATE_LIMIT_RPM으로 조정
 ];
@@ -56,8 +59,14 @@ function getRpm(pathname: string): number {
 }
 
 function isRateLimited(ip: string, pathname: string): boolean {
-  // 키를 경로의 앞 4세그먼트까지만 사용해 키워드별 세분화 방지
-  const routeKey = pathname.split("/").slice(0, 4).join("/");
+  // 키를 경로의 앞 4세그먼트까지만 사용해 키워드별 세분화 방지.
+  // 공개 영수증은 코드별로 나누지 않고 IP당 하나로 묶고, flying 하위 경로는
+  // 조회(GET)와 공유 집계가 한 버킷을 나눠 쓰지 않게 5세그먼트까지 본다.
+  const routeKey = pathname.startsWith("/r/")
+    ? "/r"
+    : pathname.startsWith("/api/v1/flying/")
+      ? pathname.split("/").slice(0, 5).join("/")
+      : pathname.split("/").slice(0, 4).join("/");
   const key = `${ip}::${routeKey}`;
   const rpm = getRpm(pathname);
   const now = Date.now();
@@ -103,7 +112,11 @@ export async function middleware(req: NextRequest) {
   }
 
   // 2) Public API — IP Rate Limiting
-  if (pathname.startsWith("/api/v1/") || pathname.startsWith("/api/mcp")) {
+  if (
+    pathname.startsWith("/api/v1/") ||
+    pathname.startsWith("/api/mcp") ||
+    pathname.startsWith("/r/")
+  ) {
     maybeCleanupTracker();
     const ip = getClientIp(req);
     if (isRateLimited(ip, pathname)) {
@@ -130,5 +143,6 @@ export const config = {
     "/api/admin/:path*",
     "/api/v1/:path*",
     "/api/mcp/:path*",
+    "/r/:path*",
   ],
 };
