@@ -11,7 +11,8 @@
     "health:sources": "tsx scripts/source-health.ts",
     "db:migrate": "npx tsx scripts/db/migrate.ts",
     "admin:hash": "node scripts/admin/generate-admin-password-hash.mjs",
-    "admin:replay-ranking": "npx tsx scripts/admin/replay-ranking-snapshot.ts"
+    "admin:replay-ranking": "npx tsx scripts/admin/replay-ranking-snapshot.ts",
+    "db:migrate:receipts": "tsx scripts/db/migrate-receipts.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
