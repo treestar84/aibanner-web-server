@@ -1,3 +1,4 @@
+import { readLimitedBody, publicHttpUrl } from "../safe-fetch";
 import type { TavilySource } from "./tavily";
 import { recordDiagnostic, diagnosticFailure } from "./diagnostics";
 
@@ -52,8 +53,10 @@ async function fetchFullTextWithReason(
       headers.Authorization = `Bearer ${process.env.JINA_API_KEY}`;
     }
 
+    publicHttpUrl(url);
     const res = await fetch(`https://r.jina.ai/${url}`, {
       headers,
+      redirect: "error",
       signal: AbortSignal.timeout(12_000),
     });
 
@@ -62,7 +65,7 @@ async function fetchFullTextWithReason(
       return { text: null, reason: "httpErr" };
     }
 
-    const raw = await res.text();
+    const raw = (await readLimitedBody(res, 512 * 1024)).toString("utf8");
     if (!raw || !raw.trim()) {
       recordDiagnostic("fulltext", "empty", { requestCount: 1, durationMs: Date.now() - diagnosticStarted });
       return { text: null, reason: "tooShort" };

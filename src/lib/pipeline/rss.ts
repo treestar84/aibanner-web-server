@@ -1,3 +1,4 @@
+import { safeFetchBytes } from "../safe-fetch";
 import Parser from "rss-parser";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -174,13 +175,10 @@ async function fetchFeed(config: RssFeedConfig, cutoff: Date): Promise<RssItem[]
   try {
     let xml: string;
     try {
-      const res = await fetch(config.url, {
-        headers: FETCH_HEADERS,
-        signal: AbortSignal.timeout(8000),
-        redirect: "follow",
+      const result = await safeFetchBytes(config.url, {
+        headers: FETCH_HEADERS, timeoutMs: 8000, maxBytes: 2 * 1024 * 1024,
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      xml = await res.text();
+      xml = result.bytes.toString("utf8");
     } catch (fetchErr) {
       console.warn(
         `[RSS] HTTP fetch failed for ${config.title}: ${(fetchErr as Error).message}`

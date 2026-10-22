@@ -3,25 +3,26 @@ name: Server CI
 on:
   push:
     branches: [main]
-    paths: ["web-server/**"]
   pull_request:
-    paths: ["web-server/**"]
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web-server
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v22
+      - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
-          cache-dependency-path: web-server/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npx tsc --noEmit
       - run: npm test
-      - run: npm run build
+      - run: node --import tsx scripts/test-mcp-hardening.mjs
+      # Compile/typecheck without granting PR code access to the production DB.
+      # Full prerender build runs during release validation/deployment.
+      - run: npm run build -- --experimental-build-mode compile
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/ci
       - run: npm audit --omit=dev

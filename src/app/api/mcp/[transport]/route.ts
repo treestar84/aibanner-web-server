@@ -1,3 +1,4 @@
+import { readLimitedBody } from "@/lib/safe-fetch";
 // Vibenow MCP 서버 (docs/mcp-server-design.md) — 도구 등록만 하는 얇은 라우트.
 // 실제 구현은 src/lib/mcp/tools.ts, 응답 정책은 src/lib/mcp/policy.ts.
 
@@ -215,6 +216,7 @@ const handler = createMcpHandler(
       version: "1.0.0",
     },
     capabilities: { tools: {} },
+    ...{ maxToolInputElements: 1000 },
   },
   {
     basePath: "/api/mcp",
@@ -222,4 +224,14 @@ const handler = createMcpHandler(
   }
 );
 
-export { handler as GET, handler as POST, handler as DELETE };
+async function boundedHandler(request: Request): Promise<Response> {
+  if (request.method !== "POST") return handler(request);
+  try {
+    const bytes = await readLimitedBody(request, 32 * 1024);
+    // Bound the transport body before the SDK reads or validates JSON.
+    return handler(new Request(request.url, {
+      method: request.method, headers: request.headers, body: new Uint8Array(bytes),
+    }));
+  } catch { return new Response("Request body too large", { status: 413 }); }
+}
+export { boundedHandler as GET, boundedHandler as POST, boundedHandler as DELETE };

@@ -33,7 +33,7 @@ test("OG instrumentation preserves chosen URLs and one fetch with diagnostics of
       for (const enabled of [false, true]) {
         let calls = 0;
         global.fetch = (async () => { calls++; return new Response(html); }) as typeof fetch;
-        results.push(await observed(enabled, () => extractOgImage(source.url)));
+        results.push(await observed(enabled, () => extractOgImage(source.url, async () => { calls++; return { bytes: Buffer.from(html), contentType: "text/html", url: source.url }; })));
         assert.equal(calls, 1);
       }
       assert.deepEqual(results, [expected, expected]);
