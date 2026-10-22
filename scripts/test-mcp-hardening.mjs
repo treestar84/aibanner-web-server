@@ -18,3 +18,7 @@ const elements = await POST(request({ jsonrpc: '2.0', id: 2, method: 'tools/call
 const rejected = await elements.text();
 assert.match(rejected, /maximum of 1000 elements/i);
 console.log('PASS: MCP tool discovery; body cap; SDK argument complexity cap');
+// mcp-handler owns a process-wide session cleanup interval with no exported
+// teardown. All assertions above are awaited; terminate this isolated CLI probe
+// so a successful verification does not keep a CI worker alive indefinitely.
+process.exit(0);
