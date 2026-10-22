@@ -20,12 +20,15 @@
     "@vercel/blob": "^2.8.0",
     "cheerio": "^1.0.0",
     "google-auth-library": "^11.0.2",
-    "mcp-handler": "^1.1.0",
-    "next": "15.5.25",
+    "ipaddr.js": "2.2.0",
+    "mcp-handler": "1.1.0",
+    "next": "15.5.28",
     "openai": "^4.86.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "rss-parser": "^3.13.0",
+    "sharp": "^0.35.5",
+    "undici": "7.29.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -39,5 +42,10 @@
     "tailwindcss": "^3.4.17",
     "tsx": "^4.23.0",
     "typescript": "^5.7.3"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "postcss": "^8.5.23",
+    "postcss-selector-parser": "7.1.7"
   }
 }

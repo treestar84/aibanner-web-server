@@ -19,6 +19,6 @@ export function isAllowedBlobImageUrl(raw: string): boolean {
   } catch {
     return false;
   }
-  if (parsed.protocol !== "https:") return false;
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) return false;
   return parsed.hostname.endsWith(ALLOWED_BLOB_HOST_SUFFIX);
 }

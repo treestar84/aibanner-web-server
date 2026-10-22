@@ -1,31 +1,26 @@
+import { safeFetchBytes, publicHttpUrl } from "../safe-fetch";
 import { load } from "cheerio";
 import { recordDiagnostic, diagnosticFailure, type DiagnosticOutcome } from "./diagnostics";
 
 const DEFAULT_IMAGE = "/images/default-thumbnail.png";
 const FETCH_TIMEOUT_MS = 5000;
 
-export async function extractOgImage(url: string): Promise<string> {
+export async function extractOgImage(url: string, fetchBytes = safeFetchBytes): Promise<string> {
   const diagnosticStarted = Date.now();
   const observed = (image: string, outcome: DiagnosticOutcome, maxHttpStatus?: number): string => {
     recordDiagnostic("image", outcome, { requestCount: 1, durationMs: Date.now() - diagnosticStarted, ...(maxHttpStatus ? { maxHttpStatus } : {}) });
     return image;
   };
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-    const res = await fetch(url, {
-      signal: controller.signal,
+    const result = await fetchBytes(url, {
+      timeoutMs: FETCH_TIMEOUT_MS, maxBytes: 2 * 1024 * 1024,
+      contentTypes: ["text/html", "application/xhtml+xml"],
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (compatible; AI-Trend-Widget/1.0; +https://aitrendwidget.vercel.app)",
+        "User-Agent": "Mozilla/5.0 (compatible; AI-Trend-Widget/1.0; +https://aitrendwidget.vercel.app)",
       },
     });
-    clearTimeout(timer);
-
-    if (!res.ok) return observed(DEFAULT_IMAGE, "http_error", res.status);
-
-    const html = await res.text();
+    const html = result.bytes.toString("utf8");
+    url = result.url;
     const $ = load(html);
 
     // 1차: og:image
@@ -56,8 +51,8 @@ export async function extractOgImage(url: string): Promise<string> {
 
 function isValidImageUrl(url: string): boolean {
   try {
-    new URL(url);
-    return url.startsWith("http");
+    publicHttpUrl(url);
+    return true;
   } catch {
     return false;
   }

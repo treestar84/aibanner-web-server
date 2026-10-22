@@ -1,3 +1,4 @@
+import { limitedJson } from "@/lib/api/limited-json";
 import { NextRequest, NextResponse } from "next/server";
 import { parseClientMeta, parseErrorItems } from "@/lib/api/client_reports";
 import { recordClientErrors } from "@/lib/db/telemetry";
@@ -10,7 +11,9 @@ export const revalidate = 0;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null);
+    let body: unknown;
+    try { body = await limitedJson(req); }
+    catch { return NextResponse.json({ error: "Payload too large" }, { status: 413 }); }
     const meta = parseClientMeta(body);
     if (!meta) {
       return NextResponse.json({ error: "Invalid client meta" }, { status: 400 });

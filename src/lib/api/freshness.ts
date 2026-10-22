@@ -1,14 +1,18 @@
 import type { PipelineMode } from "@/lib/pipeline/mode";
 
-export function buildFreshness(updatedAtUtc: string) {
-  const generatedAt = new Date().toISOString();
+export function buildFreshness(updatedAtUtc: string, nextUpdateAtUtc?: string, now = new Date()) {
+  const generatedAt = now.toISOString();
   const updatedMs = new Date(updatedAtUtc).getTime();
   const generatedMs = new Date(generatedAt).getTime();
   const ingestionLagSec = Number.isFinite(updatedMs)
     ? Math.max(0, Math.floor((generatedMs - updatedMs) / 1000))
     : null;
 
+  const nextMs = Date.parse(nextUpdateAtUtc ?? "");
+  const overdueSec = Number.isFinite(nextMs) ? Math.max(0, Math.floor((generatedMs - nextMs) / 1000)) : null;
   return {
+    scheduleStatus: overdueSec === null ? "unknown" : overdueSec >= 900 ? "delayed" : "on_schedule",
+    overdueSec,
     generatedAt,
     ingestionLagSec,
   };
