@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         mode: snapshot.pipeline_mode,
-        freshness: buildFreshness(snapshot.updated_at_utc),
+        freshness: buildFreshness(snapshot.updated_at_utc, snapshot.next_update_at_utc),
         latestSnapshotId: snapshot.snapshot_id,
         updatedAt: snapshot.updated_at_utc,
         nextUpdateAt: snapshot.next_update_at_utc,
