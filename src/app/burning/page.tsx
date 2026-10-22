@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { EditorialShell } from "@/app/_components/editorial-shell";
+import editorial from "@/app/_components/editorial.module.css";
 import {
   getActiveManualKeywordIds,
   getHotKeywords,
@@ -69,19 +71,19 @@ export default async function BurningPage() {
 
   if (!snapshot) {
     return (
-      <main className={`${styles.page} min-h-screen`}>
-        <section className="max-w-2xl mx-auto px-4 py-8">
+      <EditorialShell active="burning">
+        <section>
           <Link
             href="/app"
-            className="inline-flex items-center gap-1 text-sm text-red-200/85 hover:text-red-100 mb-6 transition-colors"
+            className={editorial.back}
           >
             ← 트렌드 목록
           </Link>
-          <div className="rounded-2xl border border-red-300/20 bg-black/35 p-6 text-center">
-            <p className="text-red-100/90">아직 타는중 데이터가 없습니다.</p>
+          <div className={editorial.empty}>
+            <p>아직 타는중 데이터가 없습니다.</p>
           </div>
         </section>
-      </main>
+      </EditorialShell>
     );
   }
 
@@ -106,12 +108,12 @@ export default async function BurningPage() {
   );
 
   return (
-    <main className={`${styles.page} min-h-screen`}>
-      <section className="max-w-3xl mx-auto px-4 py-8">
+    <EditorialShell active="burning">
+      <section>
         <header className="mb-6">
           <Link
             href="/app"
-            className="inline-flex items-center gap-1 text-sm text-red-200/85 hover:text-red-100 mb-5 transition-colors"
+            className={editorial.back}
           >
             ← 트렌드 목록
           </Link>
@@ -119,27 +121,28 @@ export default async function BurningPage() {
           <div className={styles.banner}>
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h1 className="text-2xl font-black tracking-tight text-red-50">
+                <p className={editorial.eyebrow}>THE HEAT INDEX</p>
+                <h1 className={styles.title}>
                   타는중 키워드
                 </h1>
-                <p className="text-sm text-red-100/80 mt-1">
+                <p className={editorial.description}>
                   최근 {lifecycleDays}일 동안 realtime Top 10에 진입한 뒤 조회가 쌓인 키워드
                 </p>
               </div>
               <span className={styles.fireBadge}>LIVE HEAT</span>
             </div>
-            <p className="text-xs text-red-100/70 mt-4">
+            <p className={styles.updated}>
               업데이트: {formatKST(snapshot.updated_at_utc)} KST
             </p>
           </div>
         </header>
 
         {arranged.length === 0 ? (
-          <div className="rounded-2xl border border-red-300/20 bg-black/35 p-6 text-center text-red-100/85">
+          <div className={editorial.empty}>
             최근 3일 조회 데이터가 아직 없습니다.
           </div>
         ) : (
-          <div className="flex flex-wrap gap-x-2 gap-y-3">
+          <div className={styles.cloud}>
             {arranged.map((item) => {
               const displayKeyword = item.keyword_ko || item.keyword;
               const fillRatio = resolveFillRatio(item.view_count, maxViewCount);
@@ -175,6 +178,6 @@ export default async function BurningPage() {
           </div>
         )}
       </section>
-    </main>
+    </EditorialShell>
   );
 }
