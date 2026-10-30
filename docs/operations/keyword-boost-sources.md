@@ -77,3 +77,6 @@ origin 변환에서도 다시 검사한다. 해당 사이트가 들어 있는 �
 (562개 + source-health 3개), `npm run build`,
 `node --import tsx scripts/test-mcp-hardening.mjs` 통과.
 로컬 프로덕션 서버의 `/`, `/api/v1/trends/top`, `/api/v1/meta`는 모두 HTTP 200.
+
+후속 처리: 위 배포 당시 남았던 의존성 경고 7건은
+[2026-10-31 보안 수정](dependency-security-20261031.md)에서 해소했다.
