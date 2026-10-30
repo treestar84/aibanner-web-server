@@ -1,5 +1,6 @@
 import type { TavilySource } from "@/lib/pipeline/tavily";
 import { classifySourceCategory } from "@/lib/pipeline/source_category";
+import { isAllowedEvidence } from "./keyword_boost_policy";
 import {
   evaluateSourceQuality,
   SOURCE_RELEVANCE_THRESHOLD,
@@ -32,6 +33,7 @@ export function filterRelevantSources(
   sources: readonly TavilySource[],
   keyword: string
 ): TavilySource[] {
+  sources = sources.filter(isAllowedEvidence);
   if (tokenize(keyword).length <= 1) {
     return [...sources];
   }

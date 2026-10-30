@@ -1,9 +1,11 @@
 import { safeFetchBytes } from "../safe-fetch";
 import Parser from "rss-parser";
+import type { KeywordBoostSource } from "./keyword_boost_policy";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface RssFeedConfig {
+  keywordBoostSource?: KeywordBoostSource;
   url: string;
   title: string;
   tier: "P0_CURATED" | "P1_CONTEXT" | "P2_RAW" | "COMMUNITY";
@@ -23,6 +25,7 @@ export interface RssEngagement {
 }
 
 export interface RssItem {
+  keywordBoostSource?: KeywordBoostSource;
   title: string;
   link: string;
   publishedAt: Date;
@@ -38,6 +41,9 @@ export interface RssItem {
 // ─── RSS Feed list (AI-focused) ───────────────────────────────────────────────
 
 export const RSS_FEEDS: RssFeedConfig[] = [
+  // 관심도 보강 전용. 키워드 생성·사건 근거·공개 출처에는 사용하지 않는다.
+  { url: "https://fiv.co.kr/feed.xml", title: "5분 AI 뉴스", tier: "P2_RAW", lang: "ko", keywordBoostSource: "fiv" },
+  { url: "https://www.promppy.com/rss.xml", title: "promppy", tier: "P2_RAW", lang: "ko", keywordBoostSource: "promppy" },
   // ── P0_CURATED: 공식 블로그 + 고품질 큐레이션 ─────────────────────────────
   { url: "https://openai.com/blog/rss.xml", title: "OpenAI Blog", tier: "P0_CURATED", lang: "en" },
   // Anthropic 공식 RSS는 2026 들어 제거됨. 직접적 대체 없음.
@@ -214,7 +220,8 @@ async function fetchFeed(config: RssFeedConfig, cutoff: Date): Promise<RssItem[]
           title: (item.title ?? "").trim(),
           link: item.link ?? "",
           publishedAt: new Date(dateStr!),
-          summary: (item.contentSnippet ?? item.content ?? item.summary ?? "").slice(0, 500),
+        summary: config.keywordBoostSource ? "" : (item.contentSnippet ?? item.content ?? item.summary ?? "").slice(0, 500),
+        ...(config.keywordBoostSource ? { keywordBoostSource: config.keywordBoostSource } : {}),
           sourceDomain: extractDomain(item.link ?? config.url),
           feedTitle: config.title,
           tier: config.tier,

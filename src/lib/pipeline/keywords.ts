@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { isExcludedKeyword } from "./keyword_exclusions";
 import type { PipelineMode } from "./mode";
 import { filterByAudienceRelevance } from "./audience_relevance";
+import { isKeywordBoostOnly } from "./keyword_boost_policy";
 
 // ─── Generic term filter (hard filter — safety net after LLM extraction) ─────
 
@@ -190,6 +191,8 @@ function hasKoreanTransliteration(keyword: string): boolean {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface KeywordCandidate {
+  /** Separate from trusted domains and matchedItems; at most one per boost site. */
+  supplementalCount?: number;
   text: string;
   count: number;
   domains: Set<string>;
@@ -440,6 +443,7 @@ function prepareTitleBatches(items: RssItem[]): TitleEntry[][] {
   const seen = new Set<string>();
   const unique: TitleEntry[] = [];
   for (let i = 0; i < items.length; i++) {
+    if (isKeywordBoostOnly(items[i])) continue;
     const key = items[i].title.trim().toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -638,6 +642,7 @@ function matchKeywordsToItems(
 
     for (let idx = 0; idx < items.length; idx++) {
       const item = items[idx];
+      if (isKeywordBoostOnly(item)) continue;
       const haystack = `${item.title} ${item.summary}`.toLowerCase();
       const matched = searchTerms.some((term) =>
         termMatchesHaystack(term, haystack)
@@ -1336,6 +1341,39 @@ function mergeNormalizedKeywordsById(items: NormalizedKeyword[]): NormalizedKeyw
 
 // ─── Main: normalizeKeywords ────────────────────────────────────────────────
 
+/** Apply after normal extraction/filtering: supplemental items cannot create a keyword. */
+export function applyKeywordBoosts(
+  keywords: NormalizedKeyword[],
+  items: readonly RssItem[]
+): NormalizedKeyword[] {
+  const boosts = items.filter((item) => !!item.keywordBoostSource);
+  return keywords.map((keyword) => {
+    const terms = [keyword.keyword, ...keyword.aliases].map(normalizeBoostText).filter((term) => term.length >= 3);
+    const sources = new Set<string>();
+    for (const item of boosts) {
+      const title = normalizeBoostText(item.title);
+      if (terms.some((term) => {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(^|[^\\p{L}\\p{N}.])${escaped}($|[^\\p{L}\\p{N}.])`, "u").test(title);
+      })) sources.add(item.keywordBoostSource!);
+    }
+    const supplementalCount = sources.size;
+    if (!supplementalCount) return keyword;
+    return {
+      ...keyword,
+      candidates: {
+        ...keyword.candidates,
+        count: keyword.candidates.count - (keyword.candidates.supplementalCount ?? 0) + supplementalCount,
+        supplementalCount,
+      },
+    };
+  });
+}
+
+function normalizeBoostText(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/[-_·]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
 export async function normalizeKeywords(
   items: RssItem[],
   _options: { mode?: PipelineMode } = {}
@@ -1460,5 +1498,5 @@ export async function normalizeKeywords(
   console.log(
     `[keywords] Final: ${mergedById.length} keywords after matching and filtering`
   );
-  return mergedById;
+  return applyKeywordBoosts(mergedById, items);
 }

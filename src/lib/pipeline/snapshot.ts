@@ -14,6 +14,8 @@ import { collectOpenRouterItems } from "./openrouter_source";
 import { collectHuggingFaceItems } from "./huggingface_source";
 import { collectVendorAnnouncementItems } from "./vendor_announcements_source";
 import { collectBlueskyItems } from "./bluesky_source";
+import { collectKoraiaItems } from "./koraia_source";
+import { isAllowedEvidence } from "./keyword_boost_policy";
 import type { RssItem } from "./rss";
 import { normalizeKeywords } from "./keywords";
 import { collectAliasLookupKeys, resolveCanonicalKeywordIds } from "./keyword_identity";
@@ -173,6 +175,7 @@ const SOURCE_PLANS: SourcePlan[] = [
   { key: "huggingface", collect: (windowHours) => collectHuggingFaceItems(windowHours) },
   { key: "vendor_announcements", collect: (windowHours) => collectVendorAnnouncementItems(windowHours) },
   { key: "bluesky", collect: (windowHours) => collectBlueskyItems(windowHours) },
+  { key: "koraia", collect: (windowHours) => collectKoraiaItems(windowHours) },
 ];
 
 function resolveSourceWindowProfile(): SourceWindowProfile {
@@ -650,7 +653,10 @@ async function processKeyword(
   const kw = item.keyword;
   const keywordAliases = [kw.keyword, ...kw.aliases];
 
-  const cached = precomputedCached;
+  const cached = precomputedCached &&
+    isAllowedEvidence({ url: precomputedCached.keyword.top_source_url ?? "", domain: precomputedCached.keyword.top_source_domain ?? "" }) &&
+    precomputedCached.sources.every(isAllowedEvidence)
+    ? precomputedCached : null;
 
   if (cached) {
     const localizedKeyword = await ensureLocalizedKeyword(
@@ -969,6 +975,7 @@ async function runSnapshotPipelineInternal(
     huggingFaceItems,
     vendorAnnouncementItems,
     blueskyItems,
+    koraiaItems,
   ] = await Promise.all(
     SOURCE_PLANS.map((plan) =>
       collectWithIncrementalWindow(profile, plan, sourceStateMap)
@@ -994,13 +1001,14 @@ async function runSnapshotPipelineInternal(
     ...githubItems,
     ...redditItems,
     ...blueskyItems,
+    ...koraiaItems,
   ].filter((item) => {
     if (seenUrls.has(item.link)) return false;
     seenUrls.add(item.link);
     return true;
   });
   console.log(
-    `[snapshot] Got ${allItems.length} items (productHuntTop=${productHuntTopItems.length}, rss=${rssItems.length}, vendorAnnounce=${vendorAnnouncementItems.length}, githubMd=${githubMdItems.length}, githubRel=${githubReleaseItems.length}, changelog=${changelogItems.length}, openrouter=${openRouterItems.length}, huggingface=${huggingFaceItems.length}, youtube=${youtubeItems.length}, techmeme=${techmemeItems.length}, googleAlerts=${googleAlertsItems.length}, hn=${hnItems.length}, gdelt=${gdeltItems.length}, github=${githubItems.length}, reddit=${redditItems.length}, bluesky=${blueskyItems.length})`
+    `[snapshot] Got ${allItems.length} items (productHuntTop=${productHuntTopItems.length}, rss=${rssItems.length}, vendorAnnounce=${vendorAnnouncementItems.length}, githubMd=${githubMdItems.length}, githubRel=${githubReleaseItems.length}, changelog=${changelogItems.length}, openrouter=${openRouterItems.length}, huggingface=${huggingFaceItems.length}, youtube=${youtubeItems.length}, techmeme=${techmemeItems.length}, googleAlerts=${googleAlertsItems.length}, hn=${hnItems.length}, gdelt=${gdeltItems.length}, github=${githubItems.length}, reddit=${redditItems.length}, bluesky=${blueskyItems.length}, koraia=${koraiaItems.length})`
   );
 
   // 2~3) 키워드 추출 + 정규화 (AI 클러스터링)

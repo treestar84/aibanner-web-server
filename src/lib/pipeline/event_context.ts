@@ -3,6 +3,7 @@ import type { RssItem } from "./rss";
 import { classifySourceCategory } from "./source_category";
 import { SNIPPET_MAX_CHARS } from "./snippet_policy";
 import type { TavilySource } from "./tavily";
+import { isAllowedEvidence, isKeywordBoostOnly } from "./keyword_boost_policy";
 
 const MAX_EVENT_CONTEXT_ARTICLES = 5;
 
@@ -51,7 +52,7 @@ export function buildEventContext(
 ): EventContext {
   const matched = [...keyword.candidates.matchedItems]
     .map((index) => items[index])
-    .filter((item): item is RssItem => item != null)
+    .filter((item): item is RssItem => item != null && !isKeywordBoostOnly(item))
     .sort((a, b) => tierOrder(a.tier) - tierOrder(b.tier));
 
   const seen = new Set<string>();
@@ -75,7 +76,7 @@ export function buildEventContext(
 }
 
 export function toOriginSources(context: EventContext): TavilySource[] {
-  return context.articles.map((article) => {
+  return context.articles.filter(isAllowedEvidence).map((article) => {
     const base = {
       title: article.title,
       url: article.url,

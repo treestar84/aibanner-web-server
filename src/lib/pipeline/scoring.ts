@@ -167,10 +167,12 @@ export function calculateScore(
   // recency: 실제 반감기 공식(half-life)
   const recency = Math.pow(0.5, ageHours / safeHalfLife);
 
+  // 보강 사이트는 독립 출처가 아니다. 사이트당 0.25, 최대 3곳만 빈도에 반영한다.
+  const supplementalBonus = Math.min(3, Math.max(0, keyword.candidates.supplementalCount ?? 0)) * 0.25;
   // frequency: 유니크 도메인 수 + 보정 보너스 기반
   const frequency = Math.min(
     1,
-    (keyword.candidates.domains.size + keyword.candidates.domainBonus) / 10
+    (keyword.candidates.domains.size + keyword.candidates.domainBonus + supplementalBonus) / 10
   );
 
   // authority: tier 기반에 선택적 source override를 반영

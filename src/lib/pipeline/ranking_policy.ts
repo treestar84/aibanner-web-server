@@ -337,6 +337,7 @@ export function calculateKeywordPolicyDelta(
   meta: KeywordPolicyMeta
 ): number {
   let delta = 0;
+  const evidenceCount = item.keyword.candidates.count - (item.keyword.candidates.supplementalCount ?? 0);
 
   // Phase 2-A §4.2.2 (PRD 2026-04-23 · audit-B#L194-205): 정책 delta 계수 축소.
   // 사유: 현행 +0.08/+0.06 등이 자연 score(~1.0) 대비 과도해 노이즈 키워드가 과대 부스팅되는 문제.
@@ -368,7 +369,7 @@ export function calculateKeywordPolicyDelta(
   const isWeakVersionOnly =
     meta.keywordKind === "version_only" &&
     item.keyword.candidates.domains.size < 2 &&
-    item.keyword.candidates.count < 3 &&
+    evidenceCount < 3 &&
     item.score.authority < 0.84 &&
     item.score.engagement < 0.45;
 
@@ -379,7 +380,7 @@ export function calculateKeywordPolicyDelta(
     item.keyword.candidates.domains.size === 1 &&
     item.score.engagement === 0 &&
     item.score.authority <= 0.3 &&
-    item.keyword.candidates.count <= 1;
+    evidenceCount <= 1;
 
   if (isLowSignalSingleSource) delta -= 0.14;
 
